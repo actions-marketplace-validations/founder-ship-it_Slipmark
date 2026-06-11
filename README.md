@@ -1,5 +1,7 @@
 # DriftGuard
 
+*A Reply Intelligence Group project.*
+
 **Regression locks + honest failure diagnosis for AI/LLM features.**
 
 Define behavioral invariants ("locks") for your AI features. When a code or
@@ -186,6 +188,25 @@ driftguard bisect --range "main~30..main" \
 A bisected culprit is the strongest causal evidence DriftGuard has: it lifts the
 confidence cap and the precise commit range flows into the repair prompt.
 
+## Dashboard (preview of the hosted cloud)
+
+DriftGuard renders a self-contained HTML dashboard — drift trend over runs, lock
+status, confidence bars, and drill-down repair prompts. Today it is backed by a
+local run-history JSON file; the hosted cloud will serve the same view from a
+database + API.
+
+```bash
+# Run a pack and append the result to a rolling history, then render the dashboard:
+driftguard dashboard ./drift.pack.json --history .driftguard/history.json --out dashboard.html
+
+# Or render an existing history file:
+driftguard dashboard --from dashboard/sample-history.json --out dashboard/sample.html
+```
+
+The `--history` file accumulates runs over time — that flat file is exactly the
+data model the cloud backend will persist. See `dashboard/sample.html` for a
+rendered example.
+
 ## Coding-agent integration (the headline)
 
 `--emit <dir>` writes, for each failing lock:
@@ -217,8 +238,11 @@ overconfidently when the evidence isn't there.
    checks out real commits, runs a probe, and restores the tree. ✅
 4. **Self-serve authoring — built.** Define packs in plain JSON with target
    commands and declarative assertions — no TypeScript required. ✅
-5. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
-   dashboards, RBAC; the OSS core stays the distribution flywheel. *(next)*
+5. **Dashboard view — built (static).** Self-contained HTML dashboard with drift
+   trend, lock status, and drill-down repair prompts, backed by a run-history
+   JSON. ✅
+6. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
+   add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
 
 ## Documentation
 
@@ -231,4 +255,9 @@ overconfidently when the evidence isn't there.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE). Weighing alternatives (Apache-2.0, AGPL, BSL)?
+See [LICENSE-OPTIONS.md](./LICENSE-OPTIONS.md).
+
+---
+
+DriftGuard is part of **Reply Intelligence Group**. © 2026 Reply Intelligence Group.

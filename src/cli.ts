@@ -12,9 +12,11 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve, join } from "node:path";
-import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect, loadDeclarativePack } from "./index.js";
+import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect, loadDeclarativePack, summariseRun, appendRun, renderDashboardHtml } from "./index.js";
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
+import type { DashboardData } from "./dashboard/data.js";
+import { existsSync } from "node:fs";
 
 function fail(msg: string): never {
   console.error(`driftguard: ${msg}`);
@@ -70,11 +72,49 @@ async function bisectMain(args: string[]): Promise<void> {
   process.exit(1);
 }
 
+/**
+ * `driftguard dashboard <pack> [--git f] [--history h.json] [--project name] --out file.html`
+ * or render existing history: `driftguard dashboard --from h.json --out file.html`
+ */
+async function dashboardMain(args: string[]): Promise<void> {
+  const out = argVal(args, "--out") ?? "dashboard.html";
+  const from = argVal(args, "--from");
+  const project = argVal(args, "--project");
+
+  let data: DashboardData;
+  if (from) {
+    data = JSON.parse(readFileSync(resolve(from), "utf8")) as DashboardData;
+  } else {
+    const packPath = args.find((a) => !a.startsWith("--"));
+    if (!packPath) fail("usage: driftguard dashboard <pack> [--history h.json] --out f.html  |  driftguard dashboard --from h.json --out f.html");
+    const pack = await loadPack(packPath!);
+    const run = runPack(pack, loadGit(argVal(args, "--git")));
+    const summary = summariseRun(run, { project: project ?? pack.id });
+
+    const historyPath = argVal(args, "--history");
+    const prior =
+      historyPath && existsSync(resolve(historyPath))
+        ? (JSON.parse(readFileSync(resolve(historyPath), "utf8")) as DashboardData)
+        : null;
+    data = appendRun(prior, summary, project ?? pack.id);
+    // Persist the history file — this flat file IS the "backend" today.
+    if (historyPath) writeFileSync(resolve(historyPath), JSON.stringify(data, null, 2), "utf8");
+  }
+
+  writeFileSync(resolve(out), renderDashboardHtml(data), "utf8");
+  console.log(`\n  dashboard written → ${out}  (${data.runs.length} run(s))`);
+  console.log(`  open it: file://${resolve(out)}\n`);
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
   if (args[0] === "bisect") {
     await bisectMain(args.slice(1));
+    return;
+  }
+  if (args[0] === "dashboard") {
+    await dashboardMain(args.slice(1));
     return;
   }
 

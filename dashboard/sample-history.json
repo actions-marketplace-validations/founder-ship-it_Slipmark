@@ -1,0 +1,109 @@
+{
+  "project": "support-assistant",
+  "generatedAt": "2026-06-11T09:30:00.000Z",
+  "runs": [
+    {
+      "id": "run_20260611_a1b2c",
+      "timestamp": "2026-06-11T09:30:00.000Z",
+      "packId": "support-assistant",
+      "total": 3,
+      "passed": 2,
+      "drifted": 1,
+      "errored": 0,
+      "locks": [
+        {
+          "key": "support.latest_intent_wins",
+          "name": "Latest intent wins after a topic pivot",
+          "scope": "ai",
+          "status": "drift",
+          "confidence": 0.86,
+          "confidenceTier": "high",
+          "severity": "high",
+          "signatures": ["stale_intent_carryover"],
+          "confidenceExplanation": "Confidence is high because bisection identified a specific culprit commit, and 1 watched symbol the lock depends on changed in the diff, and an execution trace corroborates the failing mechanism.",
+          "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\n\nMode: `suggest_patch` — High-confidence analysis.\nSeverity: `high`  ·  Confidence: `high` (86%)\nCommit range: `9a1f0b22` → `c7d3e914`\n\n## 4a. Causal evidence (earned, not heuristic)\n- Bisected culprit commit: `c7d3e914` introduced the failure.\n- Watched symbols changed: `composeReply`.\n- Trace observations: intentSourceUsed=\"first\", expectedIntentSource=\"latest\".\n\n## Required fix outcome\n- When the user pivots topic, the reply addresses the most recent intent.\n\nDo not edit the lock or fixtures to force a pass."
+        },
+        {
+          "key": "support.no_invented_price",
+          "name": "No invented price for unpriced items",
+          "scope": "ai",
+          "status": "pass",
+          "confidence": null,
+          "confidenceTier": null,
+          "severity": null,
+          "signatures": [],
+          "confidenceExplanation": null,
+          "repairPrompt": null
+        },
+        {
+          "key": "support.no_pii_leak",
+          "name": "No PII leaked in replies",
+          "scope": "tenancy",
+          "status": "pass",
+          "confidence": null,
+          "confidenceTier": null,
+          "severity": null,
+          "signatures": [],
+          "confidenceExplanation": null,
+          "repairPrompt": null
+        }
+      ]
+    },
+    {
+      "id": "run_20260610_b2c3d",
+      "timestamp": "2026-06-10T18:05:00.000Z",
+      "packId": "support-assistant",
+      "total": 3,
+      "passed": 2,
+      "drifted": 1,
+      "errored": 0,
+      "locks": [
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.4, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Capped at 40% — signature matched but no diff or trace yet.", "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\nMode: `minimal_fix`. Investigate the intent resolver." },
+        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
+        { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
+      ]
+    },
+    {
+      "id": "run_20260609_c3d4e",
+      "timestamp": "2026-06-09T11:40:00.000Z",
+      "packId": "support-assistant",
+      "total": 3,
+      "passed": 1,
+      "drifted": 2,
+      "errored": 0,
+      "locks": [
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.69, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Trace-only — mechanism known, commit not yet.", "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\nMode: `minimal_fix`." },
+        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "drift", "confidence": 0.72, "confidenceTier": "high", "severity": "high", "signatures": ["ungrounded_price_invention"], "confidenceExplanation": "Confidence is high because a changed file overlaps the pricing module.", "repairPrompt": "# DriftGuard repair prompt — support.no_invented_price\nMode: `suggest_patch`. Restore the price fallback." },
+        { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
+      ]
+    },
+    {
+      "id": "run_20260608_d4e5f",
+      "timestamp": "2026-06-08T08:15:00.000Z",
+      "packId": "support-assistant",
+      "total": 3,
+      "passed": 3,
+      "drifted": 0,
+      "errored": 0,
+      "locks": [
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
+        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
+        { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
+      ]
+    },
+    {
+      "id": "run_20260607_e5f6a",
+      "timestamp": "2026-06-07T14:00:00.000Z",
+      "packId": "support-assistant",
+      "total": 3,
+      "passed": 3,
+      "drifted": 0,
+      "errored": 0,
+      "locks": [
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
+        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
+        { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
+      ]
+    }
+  ]
+}

@@ -35,6 +35,9 @@ export type {
   RunTarget,
 } from "./authoring/declarative.js";
 export { loadDeclarativePack } from "./integrations/declarativeLoader.js";
+export { summariseRun, appendRun } from "./dashboard/data.js";
+export type { DashboardData, RunSummary, LockSummary } from "./dashboard/data.js";
+export { renderDashboardHtml } from "./dashboard/render.js";
 
 export {
   repairArtifactsFor,

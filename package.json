@@ -4,6 +4,8 @@
   "description": "Regression locks + honest failure diagnosis for AI/LLM features. Define behavioral invariants, detect drift, and generate coding-agent-ready repair prompts.",
   "type": "module",
   "license": "MIT",
+  "author": "Reply Intelligence Group",
+  "publisher": "Reply Intelligence Group",
   "bin": {
     "driftguard": "dist/cli.js"
   },
@@ -19,7 +21,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
-    "demo": "tsc -p tsconfig.json && node dist/src/cli.js dist/packs/demo-shop/pack.js --git packs/demo-shop/git-context.example.json --prompts"
+    "demo": "tsc -p tsconfig.json && node dist/src/cli.js dist/packs/demo-shop/pack.js --git packs/demo-shop/git-context.example.json --prompts",
+    "dashboard:sample": "tsc -p tsconfig.json && node dist/src/cli.js dashboard --from dashboard/sample-history.json --out dashboard/sample.html"
   },
   "engines": {
     "node": ">=22.6.0"
