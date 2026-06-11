@@ -1,0 +1,14 @@
+{
+  "currentCommit": "abc1234567def",
+  "lastPassingCommit": "9988776655ff",
+  "diffSummary": "refactored intent selection in the reply composer",
+  "changedFiles": [
+    {
+      "path": "packs/demo-shop/shopAssist.ts",
+      "changeType": "modified",
+      "additions": 6,
+      "deletions": 2,
+      "diffExcerpt": "const topicSource = first; // intent compose latest selection changed"
+    }
+  ]
+}

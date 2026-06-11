@@ -1,0 +1,41 @@
+{
+  "name": "driftguard",
+  "version": "0.0.1",
+  "description": "Regression locks + honest failure diagnosis for AI/LLM features. Define behavioral invariants, detect drift, and generate coding-agent-ready repair prompts.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "driftguard": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "demo": "tsc -p tsconfig.json && node dist/src/cli.js dist/packs/demo-shop/pack.js --git packs/demo-shop/git-context.example.json --prompts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "keywords": [
+    "llm",
+    "ai",
+    "regression",
+    "eval",
+    "drift",
+    "ci",
+    "coding-agent",
+    "reliability"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.19.21",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,27 @@
+/**
+ * DriftGuard — public API.
+ *
+ * The engine is domain-agnostic. Supply a `Pack` (signatures, system map,
+ * constraints, locks) and it will run the locks, detect drift, score confidence
+ * honestly, and emit a coding-agent-ready repair prompt.
+ */
+export * from "./types.js";
+export { runPack } from "./engine/runner.js";
+export type { LockRunOutcome, VerificationRun } from "./engine/runner.js";
+export { buildDriftAnalysisReport } from "./engine/analyze.js";
+export { matchFailureSignatures, listSignatures } from "./engine/signatures.js";
+export {
+  computeStructuredConfidence,
+  resolveConfidenceTier,
+  explainConfidence,
+  applyTierVisibility,
+} from "./engine/confidence.js";
+export { buildRepairPlan, buildRepairPrompt, resolvePromptMode, resolveSeverity } from "./engine/repairPlan.js";
+export { rankChangedFilesForLock, rankModulesForLock } from "./engine/scorer.js";
+export { normaliseGitContext, describeDiffAvailability, matchDiffKeywords } from "./engine/gitDiff.js";
+
+/** Convenience helper for defining a pack with type-checking. */
+import type { Pack } from "./types.js";
+export function definePack(pack: Pack): Pack {
+  return pack;
+}
