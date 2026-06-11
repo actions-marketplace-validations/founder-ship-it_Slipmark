@@ -9,11 +9,12 @@
  *
  * Exit code is non-zero if any lock drifts or errors — so it gates CI.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
-import { runPack } from "./index.js";
+import { resolve, join } from "node:path";
+import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor } from "./index.js";
 import type { GitContext, Pack } from "./types.js";
+import type { VerificationRun } from "./engine/runner.js";
 
 function fail(msg: string): never {
   console.error(`driftguard: ${msg}`);
@@ -49,6 +50,8 @@ async function main() {
   const gitIdx = args.indexOf("--git");
   const gitPath = gitIdx >= 0 ? (args[gitIdx + 1] ?? null) : null;
   const showPrompts = args.includes("--prompts");
+  const emitIdx = args.indexOf("--emit");
+  const emitDir = emitIdx >= 0 ? (args[emitIdx + 1] ?? null) : null;
 
   const pack = await loadPack(packPath!);
   const run = runPack(pack, loadGit(gitPath));
@@ -71,7 +74,28 @@ async function main() {
     }
   }
 
+  if (emitDir) emitArtifacts(run, emitDir);
+
   process.exit(run.drifted > 0 || run.errored > 0 ? 1 : 0);
+}
+
+/** Write per-lock repair prompts, an index, and the coding-agent rules doc. */
+function emitArtifacts(run: VerificationRun, dir: string): void {
+  const outDir = resolve(dir);
+  mkdirSync(outDir, { recursive: true });
+  const artifacts = repairArtifactsFor(run);
+  for (const a of artifacts) {
+    writeFileSync(join(outDir, a.filename), a.content, "utf8");
+  }
+  writeFileSync(join(outDir, "index.md"), repairIndexDoc(run, artifacts), "utf8");
+  writeFileSync(join(outDir, "AGENT_RULES.md"), agentRulesDoc(), "utf8");
+
+  console.log(`\n  emitted ${artifacts.length} repair prompt(s) to ${outDir}`);
+  for (const a of artifacts) {
+    console.log(`    → ${join(dir, a.filename)}`);
+    console.log(`      hand to Claude Code:  ${claudeCodeCommandFor(join(dir, a.filename))}`);
+  }
+  console.log(`    → ${join(dir, "AGENT_RULES.md")} (drop into .cursor/rules or CLAUDE.md)\n`);
 }
 
 main().catch((e) => fail(e instanceof Error ? e.message : String(e)));

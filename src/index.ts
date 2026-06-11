@@ -20,6 +20,14 @@ export { buildRepairPlan, buildRepairPrompt, resolvePromptMode, resolveSeverity 
 export { rankChangedFilesForLock, rankModulesForLock } from "./engine/scorer.js";
 export { normaliseGitContext, describeDiffAvailability, matchDiffKeywords } from "./engine/gitDiff.js";
 
+export {
+  repairArtifactsFor,
+  repairIndexDoc,
+  claudeCodeCommandFor,
+  agentRulesDoc,
+} from "./integrations/codingAgent.js";
+export type { RepairArtifact } from "./integrations/codingAgent.js";
+
 /** Convenience helper for defining a pack with type-checking. */
 import type { Pack } from "./types.js";
 export function definePack(pack: Pack): Pack {

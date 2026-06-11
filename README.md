@@ -97,12 +97,32 @@ the whole point of the standalone extraction.
 ## CLI
 
 ```bash
-driftguard <pack.js> [--git <git-context.json>] [--prompts]
+driftguard <pack.js> [--git <git-context.json>] [--prompts] [--emit <dir>]
 ```
 
 Exits non-zero if any lock drifts or errors, so it gates CI. Pass a git context
 (changed files since the last passing run) to lift confidence from "signature
 heuristic" to "evidence-backed" and reveal ranked files.
+
+## Coding-agent integration (the headline)
+
+`--emit <dir>` writes, for each failing lock:
+
+- `<lockKey>.repair.md` — the ready-to-run repair prompt
+- `index.md` — a summary linking every repair
+- `AGENT_RULES.md` — drop into `.cursor/rules/` or `CLAUDE.md` so any coding
+  agent treats DriftGuard prompts safely (respect investigation mode, never edit
+  locks to force a pass, re-run locks after changes)
+
+Hand a prompt to Claude Code headlessly:
+
+```bash
+claude -p "$(cat .driftguard/shop.latest_intent_wins.repair.md)"
+```
+
+This is the wedge: most tools tell you a metric dropped. DriftGuard tells your
+agent *what likely broke it* and *how to fix it safely* — and refuses to do so
+overconfidently when the evidence isn't there.
 
 ## Roadmap to "elite"
 
