@@ -5,8 +5,12 @@
  * All domain-specific constraint/impact/goal copy comes from the Pack.
  */
 import type {
+  AnalysisStatus,
+  BisectOutcome,
   ChangedFile,
   ConfidenceTier,
+  DriftSeverity,
+  ExecutionTrace,
   FailedAssertion,
   FailureSignatureMatch,
   LockDefinition,
@@ -15,8 +19,6 @@ import type {
   RankedFile,
   RankedModule,
   RepairPlan,
-  DriftSeverity,
-  AnalysisStatus,
 } from "../types.js";
 import { resolveConfidenceTier } from "./confidence.js";
 
@@ -168,6 +170,9 @@ export function buildRepairPrompt(args: {
   currentGitCommit?: string | null;
   previousPassingGitCommit?: string | null;
   confidenceExplanation?: string | null;
+  executionTrace?: ExecutionTrace | null;
+  changedWatchedSymbols?: string[];
+  bisect?: BisectOutcome | null;
 }): string {
   const {
     pack,
@@ -185,6 +190,9 @@ export function buildRepairPrompt(args: {
     currentGitCommit,
     previousPassingGitCommit,
     confidenceExplanation,
+    executionTrace,
+    changedWatchedSymbols,
+    bisect,
   } = args;
 
   const mode: PromptMode = args.mode ?? resolvePromptMode(confidence);
@@ -249,6 +257,31 @@ export function buildRepairPrompt(args: {
   const rerunLines = repairPlan.rerunLocks.map((k) => `- \`${k}\``);
   const outputLines = outputRequirements(mode).map((o, i) => `${i + 1}. ${o}`);
 
+  // ----- Causal evidence (bisect / watched symbols / execution trace) -------------------------
+  const evidenceLines: string[] = [];
+  if (bisect && bisect.firstFailingCommit) {
+    evidenceLines.push(
+      `- **Bisected culprit commit:** \`${shortCommit(bisect.firstFailingCommit)}\` introduced the failure (last good: \`${bisect.lastPassingCommit ? shortCommit(bisect.lastPassingCommit) : "unknown"}\`, found in ${bisect.evaluated} probes). Start your investigation in this commit's diff.`,
+    );
+  }
+  if (changedWatchedSymbols && changedWatchedSymbols.length > 0) {
+    evidenceLines.push(
+      `- **Watched symbols changed:** ${changedWatchedSymbols.map((s) => `\`${s}\``).join(", ")} — the specific code this lock depends on was modified.`,
+    );
+  }
+  if (executionTrace && (executionTrace.modules?.length || executionTrace.symbols?.length || executionTrace.observations)) {
+    const obs = executionTrace.observations
+      ? Object.entries(executionTrace.observations).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")
+      : "";
+    if (executionTrace.modules?.length) evidenceLines.push(`- **Trace — modules exercised:** ${executionTrace.modules.map((m) => `\`${m}\``).join(", ")}.`);
+    if (executionTrace.symbols?.length) evidenceLines.push(`- **Trace — symbols exercised:** ${executionTrace.symbols.map((s) => `\`${s}\``).join(", ")}.`);
+    if (obs) evidenceLines.push(`- **Trace — observations:** ${obs}.`);
+  }
+  const evidenceBlock =
+    evidenceLines.length > 0
+      ? ["## 4a. Causal evidence (earned, not heuristic)", "", ...evidenceLines, ""]
+      : [];
+
   const header = [
     `# DriftGuard repair prompt — ${lock.key}`,
     "",
@@ -308,6 +341,7 @@ export function buildRepairPrompt(args: {
     "",
     repairPlan.goal,
     "",
+    ...evidenceBlock,
     tier === "low" ? "## 5. Candidate system areas (modules only)" : "## 5. Most likely changed files / areas",
     "",
     ...(tier === "low" ? [] : [fileLines.join("\n"), ""]),

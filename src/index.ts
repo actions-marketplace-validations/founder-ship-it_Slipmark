@@ -19,6 +19,9 @@ export {
 export { buildRepairPlan, buildRepairPrompt, resolvePromptMode, resolveSeverity } from "./engine/repairPlan.js";
 export { rankChangedFilesForLock, rankModulesForLock } from "./engine/scorer.js";
 export { normaliseGitContext, describeDiffAvailability, matchDiffKeywords } from "./engine/gitDiff.js";
+export { bisectFirstFailing } from "./engine/bisect.js";
+export type { CommitProbe, BisectResult, BisectRunner } from "./engine/bisect.js";
+export { extractChangedSymbols, changedWatchedSymbols } from "./engine/symbols.js";
 
 export {
   repairArtifactsFor,

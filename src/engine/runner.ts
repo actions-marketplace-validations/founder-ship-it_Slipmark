@@ -42,7 +42,12 @@ export function runPack(pack: Pack, gitContext?: GitContext | null): Verificatio
         pack,
         lock,
         registry: pack.locks,
-        failedItem: { status: result.status, message: result.message, failedAssertions: result.failedAssertions },
+        failedItem: {
+          status: result.status,
+          message: result.message,
+          failedAssertions: result.failedAssertions,
+          trace: result.trace,
+        },
         gitContext,
       });
     }

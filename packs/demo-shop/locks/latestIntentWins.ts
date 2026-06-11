@@ -3,7 +3,7 @@
  * This lock will FAIL while shopAssist's PLANTED_BUG is true.
  */
 import type { LockDefinition, LockResult } from "../../../src/types.js";
-import { composeReply, type Turn } from "../shopAssist.js";
+import { composeReply, PLANTED_BUG, type Turn } from "../shopAssist.js";
 
 const PIVOT_FIXTURE: Turn[] = [
   { role: "user", text: "I want to return an item I bought" },
@@ -23,10 +23,25 @@ export const latestIntentWins: LockDefinition = {
   likelyFiles: ["packs/demo-shop/shopAssist.ts"],
   likelyModules: ["intent_resolution", "reply_composer"],
   failureSignatures: ["stale_intent_carryover"],
+  // The specific symbols this invariant depends on — a change to one of these is
+  // earned causal evidence, not a guess.
+  watchedSymbols: ["composeReply", "classifyIntent"],
   run(): LockResult {
     const reply = composeReply(PIVOT_FIXTURE).toLowerCase();
     const addressesTracking = /track|delivery|order number/.test(reply);
     const carriesOldReturnIntent = /return|refund/.test(reply);
+
+    // A good lock instruments itself: record what mechanism actually produced the
+    // behavior, so diagnosis is backed by observation rather than pattern-matching.
+    const trace: LockResult["trace"] = {
+      modules: ["intent_resolution", "reply_composer"],
+      symbols: ["composeReply", "classifyIntent"],
+      observations: {
+        intentSourceUsed: PLANTED_BUG ? "first" : "latest",
+        expectedIntentSource: "latest",
+        addressesLatestIntent: addressesTracking,
+      },
+    };
 
     const failed: LockResult["failedAssertions"] = [];
     if (!addressesTracking) {
@@ -43,12 +58,13 @@ export const latestIntentWins: LockDefinition = {
     }
 
     if (failed.length === 0) {
-      return { status: "pass", message: "Reply correctly addresses the latest intent.", failedAssertions: [] };
+      return { status: "pass", message: "Reply correctly addresses the latest intent.", failedAssertions: [], trace };
     }
     return {
       status: "drift",
       message: "Reply carried a stale earlier intent instead of the latest one (latest intent did not win).",
       failedAssertions: failed,
+      trace,
     };
   },
 };

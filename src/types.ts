@@ -15,11 +15,28 @@ export type DriftSeverity = "critical" | "high" | "medium" | "low";
 export type AnalysisStatus = "ready" | "partial" | "unavailable" | "error";
 export type ContextDepthMode = "fast" | "standard" | "deep";
 
+/**
+ * Structured evidence a lock can record about what actually happened while it
+ * exercised the behavior under test. A trace turns confidence from "pattern
+ * heuristic" into "observed mechanism" — it is the difference between guessing
+ * and knowing what the code did.
+ */
+export interface ExecutionTrace {
+  /** Modules exercised while producing the behavior under test. */
+  modules?: string[];
+  /** Specific symbols / functions exercised. */
+  symbols?: string[];
+  /** Free-form observations the lock recorded (e.g. { intentUsed: "first" }). */
+  observations?: Record<string, string | number | boolean>;
+}
+
 /** Result of running a single lock's verification against its fixtures. */
 export interface LockResult {
   status: "pass" | "drift" | "error" | "skipped";
   message: string;
   failedAssertions: FailedAssertion[];
+  /** Optional structured evidence of what the lock observed (see ExecutionTrace). */
+  trace?: ExecutionTrace;
 }
 
 export interface FailedAssertion {
@@ -43,6 +60,12 @@ export interface LockDefinition {
   likelyModules?: string[];
   /** Signature keys the lock pre-declares as plausible failure modes. */
   failureSignatures?: string[];
+  /**
+   * Symbols (function / const / class names) whose change is causally relevant
+   * to this lock. A changed-symbol match is "earned" evidence — it means the
+   * specific code behind the invariant changed, not just a nearby file.
+   */
+  watchedSymbols?: string[];
   /** Deterministic verification. Should never throw; return status "error" instead. */
   run(): LockResult;
 }
@@ -140,7 +163,18 @@ export interface ConfidenceBreakdown {
   gitDiffMatch: number;
   diffKeywordAlignment: number;
   executionTraceMatch: number;
+  /** Confidence earned by a confirmed culprit commit from bisection. */
+  bisectMatch: number;
+  /** Confidence earned by a changed watched-symbol overlap. */
+  symbolMatch: number;
   capsApplied: string[];
+}
+
+/** Outcome of bisecting a lock's failure across a commit history. */
+export interface BisectOutcome {
+  firstFailingCommit: string | null;
+  lastPassingCommit: string | null;
+  evaluated: number;
 }
 
 export interface RepairPlan {
@@ -168,5 +202,11 @@ export interface DriftAnalysisReport {
   confidenceExplanation: string | null;
   currentGitCommit: string | null;
   previousPassingGitCommit: string | null;
+  /** Execution trace the lock recorded (if any) — observed-mechanism evidence. */
+  executionTrace: ExecutionTrace | null;
+  /** Watched symbols that changed in the diff (earned causal evidence). */
+  changedWatchedSymbols: string[];
+  /** Result of bisection, if a commit history was supplied. */
+  bisect: BisectOutcome | null;
   notes: string[];
 }

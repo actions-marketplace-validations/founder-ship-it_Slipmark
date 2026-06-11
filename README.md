@@ -20,15 +20,37 @@ same engine works on any codebase.
 
 Most AI-eval / observability tools focus on **detection** (score outputs, flag a
 regression, draw a dashboard). DriftGuard's distinctive half is **diagnosis +
-repair**, and it is deliberately honest about certainty:
+repair**, and it is deliberately honest about certainty.
 
-- **It refuses to fake precision.** Confidence is *hard-capped at 0.40* when there
-  is no git diff and no execution trace — because a signature match is a heuristic,
-  not proof. At low confidence it **withholds ranked files entirely** and flips
-  into an explicit *investigation mode* ("do not apply blind fixes").
+**Confidence is earned, not guessed — a three-tier honesty cap:**
+
+| Evidence available | Confidence ceiling | Meaning |
+|---|---|---|
+| Signature/pattern only | **0.40** (low/medium) | A heuristic, not proof — `investigate_first` |
+| + execution trace | **0.69** (medium) | We know the *mechanism*, not the commit |
+| + git diff **or** bisected commit | **uncapped** (up to high) | Causal evidence links it to a specific change |
+
+- **It refuses to fake precision.** At low confidence it **withholds ranked files
+  entirely** and flips into an explicit *investigation mode* ("do not apply blind
+  fixes").
 - **The repair prompt is mode-gated** — `suggest_patch` (high), `minimal_fix`
   (medium), `investigate_first` (low) — so an agent gets the right amount of rope.
 - **Anti-gaming:** every prompt forbids editing the lock/fixtures to force a pass.
+
+### Earned causal evidence
+
+When the evidence exists, DriftGuard surfaces the smoking gun, not a guess:
+
+- **Execution traces** — a lock instruments itself (modules/symbols exercised,
+  observations like `intentSourceUsed="first"`), so diagnosis is backed by what
+  the code *actually did*.
+- **Bisection** — `bisectFirstFailing()` is a real "git-bisect for AI behavior":
+  given a commit history and a probe, it binary-searches the culprit commit in
+  ~log₂(n) steps. The host supplies the probe (check out + re-run); the engine
+  owns the algorithm.
+- **Changed watched-symbols** — a lock declares the symbols its invariant depends
+  on; when the diff changes one of them, that's earned evidence the specific code
+  behind the behavior moved.
 
 ## Quick start
 
@@ -126,17 +148,17 @@ overconfidently when the evidence isn't there.
 
 ## Roadmap to "elite"
 
-The framework and honesty model are in place. What earns the ranking next:
-
-1. **Deeper causality** — wire the reserved execution-trace signal; add real
-   bisection and semantic diff analysis so file ranking is demonstrated, not
-   heuristically guessed.
-2. **Self-serve authoring** — locks/signatures/system-map as config, not only
-   hand-written TypeScript.
-3. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
+1. **Deeper causality — built.** Execution traces, real bisection
+   (`bisectFirstFailing`), and changed-watched-symbol analysis now feed an
+   earned, three-tier confidence model. ✅
+2. **Coding-agent integration — built.** `--emit` writes repair prompts +
+   `AGENT_RULES`. ✅
+3. **Self-serve authoring** — locks/signatures/system-map as config, not only
+   hand-written TypeScript. *(next)*
+4. **Bisection host adapter** — a ready-made git checkout + re-run probe so
+   `bisectFirstFailing` works out of the box in CI. *(next)*
+5. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
    dashboards, RBAC; the OSS core stays the distribution flywheel.
-4. **First-class coding-agent integration** — Cursor / Claude Code repair-prompt
-   hand-off as the headline.
 
 ## License
 

@@ -32,6 +32,12 @@ export function computeStructuredConfidence(params: {
   rankedFiles: RankedFile[];
   hasGitDiff: boolean;
   hasExecutionTrace: boolean;
+  /** Does the trace corroborate the lock (overlapping modules / observations)? */
+  traceCorroborates: boolean;
+  /** Did bisection confirm a culprit commit? Strongest causal evidence. */
+  hasBisectCulprit: boolean;
+  /** How many of the lock's watched symbols actually changed in the diff. */
+  changedWatchedSymbolCount: number;
   lockDeclaredSignature: boolean;
   diffKeywordHitCount: number;
 }): { confidence: number; breakdown: ConfidenceBreakdown } | null {
@@ -40,11 +46,14 @@ export function computeStructuredConfidence(params: {
     rankedFiles,
     hasGitDiff,
     hasExecutionTrace,
+    traceCorroborates,
+    hasBisectCulprit,
+    changedWatchedSymbolCount,
     lockDeclaredSignature,
     diffKeywordHitCount,
   } = params;
 
-  const hasAnySignal = matches.length > 0 || hasGitDiff || hasExecutionTrace;
+  const hasAnySignal = matches.length > 0 || hasGitDiff || hasExecutionTrace || hasBisectCulprit;
   if (!hasAnySignal) return null;
 
   const topSig = matches[0]?.score ?? 0;
@@ -56,15 +65,35 @@ export function computeStructuredConfidence(params: {
   const gitDiffMatch = hasGitDiff && rankedFiles.length > 0 ? Math.min(topFile, 1) * 0.25 : 0;
   const diffKeywordAlignment =
     hasGitDiff && diffKeywordHitCount > 0 ? Math.min(0.2, diffKeywordHitCount * 0.05) : 0;
-  // Reserved: runner does not yet capture runtime traces. Stays 0 until wired.
-  const executionTraceMatch = hasExecutionTrace ? 0.3 : 0;
+  // Execution trace: now a real signal. Base for having a trace, bonus when it
+  // corroborates the lock (observed mechanism, not just "a trace exists").
+  const executionTraceMatch = hasExecutionTrace ? (traceCorroborates ? 0.25 : 0.15) : 0;
+  // Bisection: a confirmed culprit commit is the strongest causal evidence.
+  const bisectMatch = hasBisectCulprit ? 0.3 : 0;
+  // Changed watched-symbol: the specific code behind the invariant changed.
+  const symbolMatch = hasGitDiff && changedWatchedSymbolCount > 0 ? Math.min(0.2, changedWatchedSymbolCount * 0.12) : 0;
 
   let total =
-    signatureMatch + lockOwnershipMatch + gitDiffMatch + diffKeywordAlignment + executionTraceMatch;
+    signatureMatch +
+    lockOwnershipMatch +
+    gitDiffMatch +
+    diffKeywordAlignment +
+    executionTraceMatch +
+    bisectMatch +
+    symbolMatch;
 
-  if (!hasGitDiff && !hasExecutionTrace) {
+  // Three-tier honesty cap, by strength of causal evidence:
+  //   no diff, no trace, no bisect → 0.40  (pattern heuristic only)
+  //   trace but no diff/bisect     → 0.69  (we know the mechanism, not the commit)
+  //   git diff OR bisect culprit   → uncapped (can reach high)
+  const hasCausalEvidence = hasGitDiff || hasBisectCulprit;
+  if (!hasCausalEvidence && !hasExecutionTrace) {
     const cap = 0.4;
-    if (total > cap) capsApplied.push("no_diff_no_trace_cap_0.40");
+    if (total > cap) capsApplied.push("no_evidence_cap_0.40");
+    total = Math.min(total, cap);
+  } else if (!hasCausalEvidence) {
+    const cap = 0.69;
+    if (total > cap) capsApplied.push("trace_only_cap_0.69");
     total = Math.min(total, cap);
   }
 
@@ -78,6 +107,8 @@ export function computeStructuredConfidence(params: {
       gitDiffMatch: round2(gitDiffMatch),
       diffKeywordAlignment: round2(diffKeywordAlignment),
       executionTraceMatch: round2(executionTraceMatch),
+      bisectMatch: round2(bisectMatch),
+      symbolMatch: round2(symbolMatch),
       capsApplied,
     },
   };
@@ -88,29 +119,42 @@ export function explainConfidence(params: {
   breakdown: ConfidenceBreakdown | null;
   hasGitDiff: boolean;
   hasExecutionTrace: boolean;
+  hasBisectCulprit: boolean;
   changedFilesCount: number;
   ownedChangedFilesCount: number;
   topSignatureKey: string | null;
   diffKeywordHitCount: number;
+  changedWatchedSymbolCount: number;
 }): string | null {
   const {
     tier,
     breakdown,
     hasGitDiff,
     hasExecutionTrace,
+    hasBisectCulprit,
     changedFilesCount,
     ownedChangedFilesCount,
     topSignatureKey,
     diffKeywordHitCount,
+    changedWatchedSymbolCount,
   } = params;
   if (!tier || !breakdown) return null;
 
-  if (!hasGitDiff && !hasExecutionTrace) {
+  const hasCausalEvidence = hasGitDiff || hasBisectCulprit;
+
+  if (!hasCausalEvidence && !hasExecutionTrace) {
     return [
-      "Confidence is capped at 40% because DriftGuard had no git diff and no execution trace for this run.",
+      "Confidence is capped at 40% because DriftGuard had no git diff, no execution trace, and no bisected commit for this run.",
       topSignatureKey
         ? `A failure signature (\`${topSignatureKey}\`) matched the assertion pattern, but signature heuristics alone are not treated as proof.`
         : "No known failure signature matched — treat the candidate modules as hypotheses only.",
+    ].join(" ");
+  }
+
+  if (!hasCausalEvidence) {
+    return [
+      "Confidence is capped at 69% (medium) because DriftGuard has an execution trace of the failing mechanism but no git diff or bisected commit linking it to a specific change.",
+      "The trace tells us what went wrong; it does not yet tell us which change caused it.",
     ].join(" ");
   }
 
@@ -118,6 +162,7 @@ export function explainConfidence(params: {
     tier === "high" ? "Confidence is high" : tier === "medium" ? "Confidence is medium" : "Confidence is low";
   const reasons: string[] = [];
 
+  if (hasBisectCulprit) reasons.push("bisection identified a specific culprit commit");
   if (hasGitDiff) {
     if (ownedChangedFilesCount > 0) {
       reasons.push(
@@ -129,6 +174,12 @@ export function explainConfidence(params: {
       );
     }
   }
+  if (changedWatchedSymbolCount > 0) {
+    reasons.push(
+      `${changedWatchedSymbolCount} watched symbol${changedWatchedSymbolCount === 1 ? "" : "s"} the lock depends on changed in the diff`,
+    );
+  }
+  if (hasExecutionTrace) reasons.push("an execution trace corroborates the failing mechanism");
   if (breakdown.signatureMatch > 0.12 && topSignatureKey) {
     reasons.push(`the failure signature \`${topSignatureKey}\` matched strongly`);
   }
@@ -137,7 +188,6 @@ export function explainConfidence(params: {
       `diff keywords align with the lock's behavioural intent (${diffKeywordHitCount} match${diffKeywordHitCount === 1 ? "" : "es"})`,
     );
   }
-  if (!hasExecutionTrace) reasons.push("no execution trace was available");
 
   const body = reasons.length > 0 ? ` because ${reasons.join(", and ")}` : "";
   return `${tierHead}${body}.`;

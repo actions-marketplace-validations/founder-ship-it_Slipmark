@@ -8,7 +8,7 @@
       "changeType": "modified",
       "additions": 6,
       "deletions": 2,
-      "diffExcerpt": "const topicSource = first; // intent compose latest selection changed"
+      "diffExcerpt": "export function composeReply(turns) { const topicSource = first; /* was: latest */ }"
     }
   ]
 }

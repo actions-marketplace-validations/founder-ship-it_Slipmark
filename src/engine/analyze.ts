@@ -4,7 +4,9 @@
  */
 import type {
   AnalysisStatus,
+  BisectOutcome,
   DriftAnalysisReport,
+  ExecutionTrace,
   FailedAssertion,
   FailureSignatureMatch,
   GitContext,
@@ -12,10 +14,12 @@ import type {
   Pack,
   PromptMode,
   RankedFile,
+  RankedModule,
 } from "../types.js";
 import { matchFailureSignatures } from "./signatures.js";
 import { describeDiffAvailability, matchDiffKeywords, normaliseGitContext } from "./gitDiff.js";
 import { rankChangedFilesForLock, rankModulesForLock } from "./scorer.js";
+import { changedWatchedSymbols as intersectWatchedSymbols, extractChangedSymbols } from "./symbols.js";
 import {
   applyTierVisibility,
   computeStructuredConfidence,
@@ -63,8 +67,15 @@ export function buildDriftAnalysisReport(args: {
   pack: Pack;
   lock: LockDefinition;
   registry: LockDefinition[];
-  failedItem: { status: "drift" | "error" | "skipped" | "pass"; message: string; failedAssertions: FailedAssertion[] };
+  failedItem: {
+    status: "drift" | "error" | "skipped" | "pass";
+    message: string;
+    failedAssertions: FailedAssertion[];
+    trace?: ExecutionTrace;
+  };
   gitContext?: GitContext | null;
+  /** Optional bisection outcome, pre-computed by the host (it owns the working tree). */
+  bisect?: BisectOutcome | null;
 }): DriftAnalysisReport {
   const { pack, lock, registry, failedItem } = args;
 
@@ -83,12 +94,38 @@ export function buildDriftAnalysisReport(args: {
 
     const rankResult = rankChangedFilesForLock(lock, changedFiles, matches, pack.diffKeywords, git.diffSummary || null);
     const rawRankedFiles = rankResult.ranked;
-    const rankedModules = rankModulesForLock(lock, matches, changedFiles, pack.signatureToModules);
+    let rankedModules = rankModulesForLock(lock, matches, changedFiles, pack.signatureToModules);
+
+    // ----- Execution trace (lock-supplied OR git-context-supplied) ----------------------------
+    const executionTrace: ExecutionTrace | null =
+      failedItem.trace ?? (git.executionTrace as ExecutionTrace | null) ?? null;
+    const hasExecutionTrace = Boolean(
+      executionTrace && typeof executionTrace === "object" && Object.keys(executionTrace).length > 0,
+    );
+    // The trace corroborates if its modules overlap the lock's owned/ranked modules,
+    // or it carries observations of the failing mechanism.
+    const declaredModuleSet = new Set([...(lock.likelyModules || []), ...rankedModules.map((m) => m.name)]);
+    const traceModules = executionTrace?.modules || [];
+    const traceCorroborates =
+      traceModules.some((m) => declaredModuleSet.has(m)) ||
+      Boolean(executionTrace?.observations && Object.keys(executionTrace.observations).length > 0);
+    // Boost ranked modules that the trace actually exercised.
+    if (hasExecutionTrace && traceModules.length > 0) {
+      rankedModules = boostModulesByTrace(rankedModules, traceModules);
+    }
+
+    // ----- Changed watched-symbols (earned causal evidence) -----------------------------------
+    const changedSymbols = new Set<string>();
+    for (const f of changedFiles) {
+      for (const s of extractChangedSymbols(`${f.diffExcerpt || ""}`)) changedSymbols.add(s);
+    }
+    const changedWatched = intersectWatchedSymbols(lock.watchedSymbols, Array.from(changedSymbols));
+
+    // ----- Bisection (host-supplied) ----------------------------------------------------------
+    const bisect = args.bisect ?? null;
+    const hasBisectCulprit = Boolean(bisect && bisect.firstFailingCommit);
 
     const hasGitDiff = availability.available;
-    const hasExecutionTrace = Boolean(
-      git.executionTrace && typeof git.executionTrace === "object" && Object.keys(git.executionTrace).length > 0,
-    );
     const lockDeclaredSignature = matches.some((m) => m.evidence.some((e) => e.startsWith("lock_declared:")));
     const ownedChangedFilesCount = rawRankedFiles.length;
 
@@ -100,7 +137,8 @@ export function buildDriftAnalysisReport(args: {
     }
     const diffKeywordHitCount = diffKeywordHits.size;
 
-    const analysisStatus: AnalysisStatus = hasGitDiff ? "ready" : matches.length > 0 ? "partial" : "unavailable";
+    const analysisStatus: AnalysisStatus =
+      hasGitDiff || hasBisectCulprit ? "ready" : hasExecutionTrace || matches.length > 0 ? "partial" : "unavailable";
 
     const repairPlan = buildRepairPlan(pack, lock, matches, rankedModules, relatedLockKeys(lock, registry));
 
@@ -109,6 +147,9 @@ export function buildDriftAnalysisReport(args: {
       rankedFiles: rawRankedFiles,
       hasGitDiff,
       hasExecutionTrace,
+      traceCorroborates,
+      hasBisectCulprit,
+      changedWatchedSymbolCount: changedWatched.length,
       lockDeclaredSignature,
       diffKeywordHitCount,
     });
@@ -121,16 +162,22 @@ export function buildDriftAnalysisReport(args: {
       breakdown: confidenceBreakdown,
       hasGitDiff,
       hasExecutionTrace,
+      hasBisectCulprit,
       changedFilesCount: changedFiles.length,
       ownedChangedFilesCount,
       topSignatureKey: matches[0]?.key ?? null,
       diffKeywordHitCount,
+      changedWatchedSymbolCount: changedWatched.length,
     });
 
     const rankedFiles = applyTierVisibility(rawRankedFiles, confidenceTier);
     const promptMode: PromptMode = resolvePromptMode(confidence);
     const severity = resolveSeverity(lock, matches, false);
     const likelyCauseSummary = summariseLikelyCause(matches, rankedFiles, analysisStatus);
+
+    // Bisection gives the most precise commit range; fall back to the git context.
+    const currentGitCommit = bisect?.firstFailingCommit ?? git.currentCommit ?? null;
+    const previousPassingGitCommit = bisect?.lastPassingCommit ?? git.lastPassingCommit ?? null;
 
     const repairPrompt = buildRepairPrompt({
       pack,
@@ -146,9 +193,12 @@ export function buildDriftAnalysisReport(args: {
       confidence,
       severity,
       mode: promptMode,
-      currentGitCommit: git.currentCommit,
-      previousPassingGitCommit: git.lastPassingCommit,
+      currentGitCommit,
+      previousPassingGitCommit,
       confidenceExplanation,
+      executionTrace,
+      changedWatchedSymbols: changedWatched,
+      bisect,
     });
 
     const notes: string[] = [];
@@ -161,10 +211,20 @@ export function buildDriftAnalysisReport(args: {
         : `Diff availability: unavailable (${availability.reason}).`,
     );
     if (matches.length === 0) notes.push("No known failure signature matched — possible new drift pattern.");
-    if (!hasExecutionTrace) notes.push("No execution trace evidence available (reserved signal).");
+    notes.push(
+      hasExecutionTrace
+        ? `Execution trace present${traceCorroborates ? " and corroborates the failing mechanism" : " (uncorroborated)"}.`
+        : "No execution trace recorded by the lock.",
+    );
+    if (changedWatched.length > 0) {
+      notes.push(`Watched symbols changed in diff: ${changedWatched.map((s) => `\`${s}\``).join(", ")}.`);
+    }
+    if (hasBisectCulprit) {
+      notes.push(`Bisection: culprit \`${bisect!.firstFailingCommit}\` (last good \`${bisect!.lastPassingCommit ?? "unknown"}\`, ${bisect!.evaluated} probes).`);
+    }
     if (confidenceBreakdown) {
       notes.push(
-        `Confidence breakdown — sig:${confidenceBreakdown.signatureMatch.toFixed(2)}, ownership:${confidenceBreakdown.lockOwnershipMatch.toFixed(2)}, diff:${confidenceBreakdown.gitDiffMatch.toFixed(2)}, keywords:${confidenceBreakdown.diffKeywordAlignment.toFixed(2)}, trace:${confidenceBreakdown.executionTraceMatch.toFixed(2)}${confidenceBreakdown.capsApplied.length ? ` | caps: ${confidenceBreakdown.capsApplied.join(",")}` : ""}.`,
+        `Confidence breakdown — sig:${confidenceBreakdown.signatureMatch.toFixed(2)}, ownership:${confidenceBreakdown.lockOwnershipMatch.toFixed(2)}, diff:${confidenceBreakdown.gitDiffMatch.toFixed(2)}, keywords:${confidenceBreakdown.diffKeywordAlignment.toFixed(2)}, trace:${confidenceBreakdown.executionTraceMatch.toFixed(2)}, bisect:${confidenceBreakdown.bisectMatch.toFixed(2)}, symbol:${confidenceBreakdown.symbolMatch.toFixed(2)}${confidenceBreakdown.capsApplied.length ? ` | caps: ${confidenceBreakdown.capsApplied.join(",")}` : ""}.`,
       );
     }
 
@@ -183,8 +243,11 @@ export function buildDriftAnalysisReport(args: {
       confidenceTier,
       confidenceBreakdown,
       confidenceExplanation,
-      currentGitCommit: git.currentCommit ?? null,
-      previousPassingGitCommit: git.lastPassingCommit ?? null,
+      currentGitCommit,
+      previousPassingGitCommit,
+      executionTrace,
+      changedWatchedSymbols: changedWatched,
+      bisect,
       notes,
     };
   } catch (e) {
@@ -206,7 +269,28 @@ export function buildDriftAnalysisReport(args: {
       confidenceExplanation: null,
       currentGitCommit: null,
       previousPassingGitCommit: null,
+      executionTrace: null,
+      changedWatchedSymbols: [],
+      bisect: null,
       notes: ["analysis_error"],
     };
   }
+}
+
+/** Boost ranked modules the execution trace actually exercised (observed evidence). */
+function boostModulesByTrace(modules: RankedModule[], traceModules: string[]): RankedModule[] {
+  const traced = new Set(traceModules);
+  const boosted = modules.map((m) =>
+    traced.has(m.name)
+      ? { ...m, score: Math.min(m.score + 0.2, 0.97), reason: `${m.reason}; exercised by execution trace` }
+      : m,
+  );
+  // Surface any traced module not already ranked.
+  for (const name of traceModules) {
+    if (!boosted.some((m) => m.name === name)) {
+      boosted.push({ name, score: 0.5, reason: "exercised by execution trace" });
+    }
+  }
+  boosted.sort((a, b) => b.score - a.score);
+  return boosted.slice(0, 8);
 }

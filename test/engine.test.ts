@@ -34,18 +34,18 @@ test("diagnosis: the drift gets a signature match and a repair prompt", () => {
   assert.ok(analysis.rankedModules.some((m) => m.name === "intent_resolution"));
 });
 
-test("honesty: with no git diff, confidence is hard-capped at 0.40 (medium at best) and exposes no ranked files", () => {
-  const run = runPack(demoShopPack); // no git context
+test("honesty: a corroborating execution trace lifts the cap to 0.69 (medium) — knows the mechanism, not the commit", () => {
+  const run = runPack(demoShopPack); // no git diff, but the lock instruments itself with a trace
   const analysis = run.outcomes.find((o) => o.key === "shop.latest_intent_wins")!.analysis!;
 
-  // Strong signature but no diff/trace → capped at exactly 0.40 = medium tier (never high).
+  // Trace present but no diff/bisect → capped at 0.69 = medium (never high without causal evidence).
   assert.ok(analysis.confidence !== null);
-  assert.ok(analysis.confidence! <= 0.4, `expected <=0.4, got ${analysis.confidence}`);
+  assert.ok(analysis.confidence! > 0.4 && analysis.confidence! <= 0.69, `expected (0.40, 0.69], got ${analysis.confidence}`);
   assert.equal(analysis.confidenceTier, "medium");
-  assert.ok(analysis.confidenceBreakdown!.capsApplied.includes("no_diff_no_trace_cap_0.40"));
-  // No git diff means there are no files to rank — so none can be shown, regardless of tier.
-  assert.equal(analysis.rankedFiles.length, 0, "without a diff there is nothing to rank");
-  assert.equal(analysis.promptMode, "minimal_fix");
+  assert.ok(analysis.confidenceBreakdown!.capsApplied.includes("trace_only_cap_0.69"));
+  assert.ok(analysis.confidenceBreakdown!.executionTraceMatch > 0, "trace should contribute to confidence");
+  assert.ok(analysis.executionTrace, "the trace should be carried on the report");
+  assert.equal(analysis.rankedFiles.length, 0, "still no diff → nothing to rank");
 });
 
 test("honesty: a failure with no recognised signal yields null confidence and forces investigation mode", () => {
