@@ -12,7 +12,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve, join } from "node:path";
-import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor } from "./index.js";
+import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect } from "./index.js";
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 
@@ -42,10 +42,41 @@ function loadGit(path: string | null): GitContext | null {
   }
 }
 
+function argVal(args: string[], flag: string): string | null {
+  const i = args.indexOf(flag);
+  return i >= 0 ? (args[i + 1] ?? null) : null;
+}
+
+/** `driftguard bisect --range <range> --command <cmd> [--cwd <dir>]` */
+async function bisectMain(args: string[]): Promise<void> {
+  const range = argVal(args, "--range");
+  const command = argVal(args, "--command");
+  const cwd = argVal(args, "--cwd") ?? process.cwd();
+  if (!range || !command) {
+    fail('usage: driftguard bisect --range <git-range> --command "<probe cmd, exit 0 = pass>" [--cwd <dir>]');
+  }
+  console.log(`\nDriftGuard bisect — range \`${range}\`\n  probe: ${command}\n`);
+  const result = await runGitBisect({ cwd, range: range!, command: command! });
+  if (!result.firstFailingCommit) {
+    console.log(`  ✓ no regression in this range (newest commit still passes). ${result.evaluated} probes.\n`);
+    process.exit(0);
+  }
+  console.log(`  ✗ first failing commit: ${result.firstFailingCommit}`);
+  console.log(`    last good commit:    ${result.lastPassingCommit ?? "(regression predates range)"}`);
+  console.log(`    probes evaluated:    ${result.evaluated}\n`);
+  process.exit(1);
+}
+
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args[0] === "bisect") {
+    await bisectMain(args.slice(1));
+    return;
+  }
+
   const packPath = args.find((a) => !a.startsWith("--"));
-  if (!packPath) fail("usage: driftguard <pack> [--git <file.json>] [--prompts]");
+  if (!packPath) fail("usage: driftguard <pack> [--git <file.json>] [--prompts] [--emit <dir>]  |  driftguard bisect --range <r> --command <cmd>");
 
   const gitIdx = args.indexOf("--git");
   const gitPath = gitIdx >= 0 ? (args[gitIdx + 1] ?? null) : null;

@@ -22,6 +22,8 @@ export { normaliseGitContext, describeDiffAvailability, matchDiffKeywords } from
 export { bisectFirstFailing } from "./engine/bisect.js";
 export type { CommitProbe, BisectResult, BisectRunner } from "./engine/bisect.js";
 export { extractChangedSymbols, changedWatchedSymbols } from "./engine/symbols.js";
+export { runGitBisect, listCommits, currentRef, createShellProbe } from "./integrations/gitBisect.js";
+export type { GitBisectOptions } from "./integrations/gitBisect.js";
 
 export {
   repairArtifactsFor,

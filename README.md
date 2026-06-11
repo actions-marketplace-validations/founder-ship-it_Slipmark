@@ -126,6 +126,26 @@ Exits non-zero if any lock drifts or errors, so it gates CI. Pass a git context
 (changed files since the last passing run) to lift confidence from "signature
 heuristic" to "evidence-backed" and reveal ranked files.
 
+## Bisection — find the culprit commit
+
+The engine ships a real "git-bisect for AI behavior". Point it at a range and a
+probe command (exit 0 = the lock passes); it binary-searches the commit that
+introduced the regression and restores your working tree afterward:
+
+```bash
+driftguard bisect --range "main~30..main" \
+  --command "npm run build --silent && node dist/src/cli.js dist/packs/demo-shop/pack.js"
+```
+
+```
+  ✗ first failing commit: deadbeef…
+    last good commit:    00aa11bb…
+    probes evaluated:    5          # not 30 — ~log2(n)
+```
+
+A bisected culprit is the strongest causal evidence DriftGuard has: it lifts the
+confidence cap and the precise commit range flows into the repair prompt.
+
 ## Coding-agent integration (the headline)
 
 `--emit <dir>` writes, for each failing lock:
@@ -153,10 +173,10 @@ overconfidently when the evidence isn't there.
    earned, three-tier confidence model. ✅
 2. **Coding-agent integration — built.** `--emit` writes repair prompts +
    `AGENT_RULES`. ✅
-3. **Self-serve authoring** — locks/signatures/system-map as config, not only
+3. **Bisection host adapter — built.** `driftguard bisect` / `runGitBisect`
+   checks out real commits, runs a probe, and restores the tree. ✅
+4. **Self-serve authoring** — locks/signatures/system-map as config, not only
    hand-written TypeScript. *(next)*
-4. **Bisection host adapter** — a ready-made git checkout + re-run probe so
-   `bisectFirstFailing` works out of the box in CI. *(next)*
 5. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
    dashboards, RBAC; the OSS core stays the distribution flywheel.
 
