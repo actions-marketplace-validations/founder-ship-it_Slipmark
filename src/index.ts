@@ -24,6 +24,17 @@ export type { CommitProbe, BisectResult, BisectRunner } from "./engine/bisect.js
 export { extractChangedSymbols, changedWatchedSymbols } from "./engine/symbols.js";
 export { runGitBisect, listCommits, currentRef, createShellProbe } from "./integrations/gitBisect.js";
 export type { GitBisectOptions } from "./integrations/gitBisect.js";
+export { compileDeclarativePack, evaluateAssertions } from "./authoring/declarative.js";
+export type {
+  DeclarativePack,
+  DeclarativeLock,
+  DeclarativeAssertion,
+  DeclarativeSignature,
+  DeclarativeTarget,
+  AssertionType,
+  RunTarget,
+} from "./authoring/declarative.js";
+export { loadDeclarativePack } from "./integrations/declarativeLoader.js";
 
 export {
   repairArtifactsFor,

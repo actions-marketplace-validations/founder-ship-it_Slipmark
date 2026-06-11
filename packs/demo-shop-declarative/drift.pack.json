@@ -1,0 +1,76 @@
+{
+  "id": "demo-shop-declarative",
+  "signatures": [
+    {
+      "key": "stale_intent_carryover",
+      "label": "Stale intent carryover",
+      "description": "The reply continues to address an earlier topic after the user pivoted to a new intent.",
+      "assertionNames": ["focuses_on_latest_intent", "no_prior_intent_carryover"],
+      "patterns": ["latest\\s+intent", "prior\\s+(?:intent|topic)", "carry(?:over|forward)"]
+    }
+  ],
+  "signatureToModules": {
+    "stale_intent_carryover": ["intent_resolution", "reply_composer"]
+  },
+  "baseConstraints": [
+    "Do not change the assistant's tone or break existing channel flows",
+    "Do not change DriftGuard lock logic to make a failing lock pass"
+  ],
+  "scopeConstraints": {
+    "ai": ["Latest user intent must win over earlier topics in the composed reply"]
+  },
+  "scopeImpact": {
+    "ai": "Customers who change topic mid-chat may be answered about the wrong thing — high abandonment risk."
+  },
+  "signatureGoals": {
+    "stale_intent_carryover": "Ensure the composer anchors on the latest user intent, not an earlier superseded one."
+  },
+  "signatureImpact": {
+    "stale_intent_carryover": "Users who pivot topic get answered about the wrong service — high conversion risk."
+  },
+  "diffKeywords": ["intent", "compose", "reply", "first", "latest"],
+  "systemMap": {
+    "modules": [
+      {
+        "moduleKey": "intent_resolution",
+        "displayName": "Intent resolution",
+        "shortSummary": "Decides which user intent the reply should address.",
+        "commonFailureModes": ["anchors on the first intent instead of the latest"],
+        "typicalDriftSignatures": ["stale_intent_carryover"]
+      },
+      {
+        "moduleKey": "reply_composer",
+        "displayName": "Reply composer",
+        "shortSummary": "Builds the final reply text from the resolved intent.",
+        "typicalDriftSignatures": ["stale_intent_carryover"]
+      }
+    ]
+  },
+  "locks": [
+    {
+      "key": "shop.latest_intent_wins",
+      "name": "Latest intent wins after a topic pivot",
+      "scope": "ai",
+      "invariants": [
+        "When the user pivots topic, the reply addresses the most recent intent.",
+        "The reply does not continue answering a superseded earlier intent."
+      ],
+      "likelyModules": ["intent_resolution", "reply_composer"],
+      "failureSignatures": ["stale_intent_carryover"],
+      "watchedSymbols": ["composeReply"],
+      "target": { "command": "node assistant.mjs", "inputFormat": "stdin-json" },
+      "fixture": {
+        "turns": [
+          { "role": "user", "text": "I want to return an item I bought" },
+          { "role": "assistant", "text": "Sure, I can help with that." },
+          { "role": "user", "text": "actually never mind — can you track my order instead?" }
+        ]
+      },
+      "assertions": [
+        { "name": "focuses_on_latest_intent", "type": "matches", "value": "track|delivery|order number" },
+        { "name": "no_prior_intent_carryover", "type": "not_matches", "value": "return|refund" }
+      ],
+      "driftMessage": "Reply carried a stale earlier intent instead of the latest one (latest intent did not win)."
+    }
+  ]
+}

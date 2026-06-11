@@ -12,7 +12,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve, join } from "node:path";
-import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect } from "./index.js";
+import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect, loadDeclarativePack } from "./index.js";
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 
@@ -22,6 +22,9 @@ function fail(msg: string): never {
 }
 
 async function loadPack(modPath: string): Promise<Pack> {
+  // Declarative JSON pack → no code required.
+  if (modPath.endsWith(".json")) return loadDeclarativePack(modPath);
+
   const url = pathToFileURL(resolve(modPath)).href;
   const mod = (await import(url)) as Record<string, unknown>;
   const candidate =

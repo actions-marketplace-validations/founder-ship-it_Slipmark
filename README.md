@@ -91,6 +91,46 @@ engine
 DriftAnalysisReport  (cause, ranked files/modules, confidence, repair prompt)
 ```
 
+## Authoring locks — two ways
+
+### 1. Config-only (JSON, no code) — the fastest start
+
+Define a pack in plain JSON and point each lock at a target command that emits
+your AI's output. DriftGuard runs the command with your fixture on stdin and
+asserts on stdout — it does not care what language your system is in:
+
+```jsonc
+{
+  "id": "my-product",
+  "locks": [{
+    "key": "support.latest_intent_wins",
+    "scope": "ai",
+    "invariants": ["When the user pivots topic, the reply addresses the latest intent."],
+    "failureSignatures": ["stale_intent_carryover"],
+    "watchedSymbols": ["composeReply"],
+    "target": { "command": "node assistant.mjs", "inputFormat": "stdin-json" },
+    "fixture": { "turns": [/* ... */] },
+    "assertions": [
+      { "name": "focuses_on_latest_intent", "type": "matches", "value": "track|delivery" },
+      { "name": "no_prior_intent_carryover", "type": "not_matches", "value": "return|refund" }
+    ]
+  }]
+}
+```
+
+```bash
+driftguard ./drift.pack.json --emit .driftguard
+```
+
+Assertion types: `contains`, `not_contains`, `matches`, `not_matches`, `equals`,
+`not_equals`. Omit `target.command` for "golden mode" (the fixture itself is the
+output). See `packs/demo-shop-declarative/` for a complete working example.
+
+### 2. TypeScript (full power)
+
+For arbitrary verification logic, self-instrumenting execution traces, or
+in-process targets, define a `Pack` in TypeScript.
+
 ### The `Pack` — the entire extensibility story
 
 The engine imports nothing domain-specific. A `Pack` carries it all:
@@ -175,10 +215,10 @@ overconfidently when the evidence isn't there.
    `AGENT_RULES`. ✅
 3. **Bisection host adapter — built.** `driftguard bisect` / `runGitBisect`
    checks out real commits, runs a probe, and restores the tree. ✅
-4. **Self-serve authoring** — locks/signatures/system-map as config, not only
-   hand-written TypeScript. *(next)*
+4. **Self-serve authoring — built.** Define packs in plain JSON with target
+   commands and declarative assertions — no TypeScript required. ✅
 5. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
-   dashboards, RBAC; the OSS core stays the distribution flywheel.
+   dashboards, RBAC; the OSS core stays the distribution flywheel. *(next)*
 
 ## License
 
