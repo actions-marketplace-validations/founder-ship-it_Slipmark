@@ -220,6 +220,15 @@ overconfidently when the evidence isn't there.
 5. **Hosted cloud (open-core)** — run history, shared lock catalogues, CI
    dashboards, RBAC; the OSS core stays the distribution flywheel. *(next)*
 
+## Documentation
+
+- [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
+  the honesty model, repair prompts).
+- [Authoring guide](./docs/authoring.md) — JSON and TypeScript packs, assertion
+  types, bisection wiring.
+- [Contributing](./CONTRIBUTING.md) — setup, layout, the non-negotiables.
+- [Changelog](./CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

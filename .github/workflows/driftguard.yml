@@ -19,6 +19,9 @@ jobs:
       - run: npm run build
       - name: Type-check and unit tests
         run: npm test
-      - name: DriftGuard locks (demo pack)
-        # Exits non-zero on drift, failing the job — this is the gate.
+      - name: DriftGuard demo (informational)
+        # The demo pack ships a PLANTED bug, so it intentionally drifts and the CLI
+        # exits non-zero. That is expected here — it's a teaching example, not a gate.
+        # In a real project you DO want this to fail CI on drift (drop continue-on-error).
+        continue-on-error: true
         run: node dist/src/cli.js dist/packs/demo-shop/pack.js
