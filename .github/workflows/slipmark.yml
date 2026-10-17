@@ -1,4 +1,4 @@
-name: DriftGuard
+name: Slipmark
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history so DriftGuard can compute a diff vs. the last passing run.
+          # Full history so Slipmark can compute a diff vs. the last passing run.
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -21,7 +21,7 @@ jobs:
         run: npm test
 
       # The demos below are built to be refused. Each step passes only when
-      # DriftGuard catches the planted problem, and fails if it lets it through.
+      # Slipmark catches the planted problem, and fails if it lets it through.
       # In your own project, drop these and let a refusal fail the build.
 
       - name: "Demo: drift diagnosis catches the planted bug"

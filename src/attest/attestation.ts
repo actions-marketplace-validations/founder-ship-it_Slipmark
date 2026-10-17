@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export const ATTESTATION_SCHEMA = "driftguard/attestation@1";
+export const ATTESTATION_SCHEMA = "slipmark/attestation@1";
 
 /** Verdicts that clear the gate. Anything else blocks. */
 export const PASSING_VERDICTS = ["pass", "cleared"] as const;
@@ -178,7 +178,7 @@ export function verifyAttestations(opts: {
   require?: string[];
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
-  const dir = resolve(root, opts.dir ?? ".driftguard/attestations");
+  const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const results: CheckResult[] = [];
   const covered = new Set<string>();
   const files = listAttestationFiles(dir);

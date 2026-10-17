@@ -57,7 +57,7 @@ function modeHeadline(mode: PromptMode): string {
 function behaviouralRequirements(mode: PromptMode): string[] {
   const shared = [
     "Stay inside the ranked likely-cause area; do not refactor unrelated modules.",
-    "Do not modify DriftGuard lock code, fixtures, or assertions to force a pass.",
+    "Do not modify Slipmark lock code, fixtures, or assertions to force a pass.",
     "Where analysis labels a field 'likely', 'probable', or 'inferred', treat it as a hypothesis — confirm before trusting it.",
   ];
   if (mode === "suggest_patch") {
@@ -72,7 +72,7 @@ function behaviouralRequirements(mode: PromptMode): string[] {
   }
   return [
     "DO NOT edit product code yet. DO NOT apply blind fixes.",
-    "Do not modify DriftGuard lock code, fixtures, or assertions to force a pass.",
+    "Do not modify Slipmark lock code, fixtures, or assertions to force a pass.",
     "Treat the candidate areas below as hypotheses only — confidence is low and ranked files are unavailable.",
     "Produce a diagnosis report, not a patch.",
     "Recommend the smallest next step (targeted experiment, logging, or rollback candidate), not a full change.",
@@ -95,7 +95,7 @@ function outputRequirements(mode: PromptMode): string[] {
       "Root cause analysis (1–3 paragraphs).",
       "Proposed diffs (exact, per file), with reasoning per hunk.",
       "List of files/modules intentionally NOT changed and why.",
-      "Verification steps: which DriftGuard locks will pass after the change and why.",
+      "Verification steps: which Slipmark locks will pass after the change and why.",
       "Rollback plan in two lines.",
     ];
   }
@@ -283,7 +283,7 @@ export function buildRepairPrompt(args: {
       : [];
 
   const header = [
-    `# DriftGuard repair prompt — ${lock.key}`,
+    `# Slipmark repair prompt — ${lock.key}`,
     "",
     `Lock: **${lock.name}** (scope: \`${lock.scope}\`)`,
     `Mode: \`${mode}\` — ${modeHeadline(mode)}`,
@@ -371,7 +371,7 @@ export function buildRepairPrompt(args: {
     "",
     "## 10. Verification — rerun locks",
     "",
-    "Run these DriftGuard locks; each must return status `pass`:",
+    "Run these Slipmark locks; each must return status `pass`:",
     "",
     rerunLines.join("\n"),
     "",
@@ -381,7 +381,7 @@ export function buildRepairPrompt(args: {
     "",
     "---",
     "",
-    "DriftGuard does not apply this prompt automatically. Any code change is the responsibility of",
+    "Slipmark does not apply this prompt automatically. Any code change is the responsibility of",
     "the engineer or agent acting on it. Lock logic, fixtures, and assertions must not be edited to",
     "force a pass.",
     "",

@@ -1,5 +1,5 @@
 /**
- * DriftGuard — core domain-agnostic types.
+ * Slipmark — core domain-agnostic types.
  *
  * The engine knows NOTHING about any specific product. All domain knowledge
  * (signatures, module maps, constraints, fixtures) is supplied by a `Pack`.

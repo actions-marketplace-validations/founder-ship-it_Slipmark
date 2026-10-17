@@ -1,10 +1,10 @@
 /**
  * ShopAssist — a tiny e-commerce support reply composer used as the "product
  * under test" for the demo pack. This is intentionally NOT ReplyOS: it proves
- * the DriftGuard engine works on an unrelated domain with no engine changes.
+ * the Slipmark engine works on an unrelated domain with no engine changes.
  *
  * It contains ONE deliberately planted regression (see PLANTED_BUG) so the demo
- * can show DriftGuard catching and diagnosing a real behavioural drift.
+ * can show Slipmark catching and diagnosing a real behavioural drift.
  */
 
 export interface Turn {

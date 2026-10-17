@@ -6,11 +6,11 @@ Two ways to author locks: **JSON** (no code) and **TypeScript** (full power).
 
 ## JSON packs (no code)
 
-A JSON pack is the fastest way to protect an AI behavior. DriftGuard runs your
+A JSON pack is the fastest way to protect an AI behavior. Slipmark runs your
 **target command** with the fixture on stdin and asserts on its stdout.
 
 ```bash
-driftguard ./drift.pack.json [--git <ctx.json>] [--prompts] [--emit <dir>]
+slipmark ./drift.pack.json [--git <ctx.json>] [--prompts] [--emit <dir>]
 ```
 
 ### Minimal pack
@@ -90,7 +90,7 @@ Use TypeScript when you need arbitrary verification logic, in-process targets,
 or self-instrumenting execution traces.
 
 ```ts
-import { definePack, type LockDefinition } from "driftguard";
+import { definePack, type LockDefinition } from "slipmark";
 
 const latestIntentWins: LockDefinition = {
   key: "support.latest_intent_wins",
@@ -123,10 +123,10 @@ See `packs/demo-shop/` for a complete TypeScript pack.
 ## Wiring bisection (find the culprit commit)
 
 ```bash
-driftguard bisect --range "main~30..main" \
+slipmark bisect --range "main~30..main" \
   --command "npm run build --silent && node dist/src/cli.js dist/packs/demo-shop/pack.js"
 ```
 
-The probe command's exit code decides pass/fail at each commit; DriftGuard
+The probe command's exit code decides pass/fail at each commit; Slipmark
 binary-searches the first failing one and restores your working tree. A clean
 working tree is required.

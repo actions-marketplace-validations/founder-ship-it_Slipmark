@@ -1,7 +1,7 @@
 # Verdict attestation
 
 A verdict is only worth something if you can prove what it was about.
-DriftGuard's attestation gate makes every agent verdict carry that proof.
+Slipmark's attestation gate makes every agent verdict carry that proof.
 
 ## The model
 
@@ -9,7 +9,7 @@ DriftGuard's attestation gate makes every agent verdict carry that proof.
    review, a QA run.
 2. It records an **attestation**: who it is, the verdict, and the SHA-256 of
    every file it actually read.
-3. Before anything ships, `driftguard verify` re-hashes those files on the tree
+3. Before anything ships, `slipmark verify` re-hashes those files on the tree
    you are about to merge. If a single byte differs, the verdict was about a
    different file, and the gate refuses.
 
@@ -20,7 +20,7 @@ gives the same answer every time.
 
 ```json
 {
-  "schema": "driftguard/attestation@1",
+  "schema": "slipmark/attestation@1",
   "by": "security-audit-agent",
   "verdict": "cleared",
   "at": "2026-10-17T09:00:00.000Z",
@@ -35,7 +35,7 @@ gives the same answer every time.
 - `verdict` of `pass` or `cleared` can clear the gate. Anything else blocks.
 - `at` and `note` are informational. The gate never trusts them.
 
-Files live in `.driftguard/attestations/` by default, one JSON file each.
+Files live in `.slipmark/attestations/` by default, one JSON file each.
 Change it with `--dir`.
 
 ## Writing attestations
@@ -43,7 +43,7 @@ Change it with `--dir`.
 From a shell step:
 
 ```bash
-driftguard attest --by review-agent --verdict pass \
+slipmark attest --by review-agent --verdict pass \
   --subject src/export.ts --subject src/export.test.ts \
   --note "Reviewed against SPECS/invoice-export.md"
 ```
@@ -51,14 +51,14 @@ driftguard attest --by review-agent --verdict pass \
 From code:
 
 ```ts
-import { createAttestation, writeAttestation, defaultAttestationPath } from "driftguard";
+import { createAttestation, writeAttestation, defaultAttestationPath } from "slipmark";
 
 const att = createAttestation({
   by: "security-audit-agent",
   verdict: "cleared",
   subjects: ["specs/invoice-export.md"],
 });
-writeAttestation(defaultAttestationPath(".driftguard/attestations", att), att);
+writeAttestation(defaultAttestationPath(".slipmark/attestations", att), att);
 ```
 
 Attest the files the agent **read**, at the moment it gave the verdict. If the
@@ -68,7 +68,7 @@ the spec, the old verdict will (correctly) stop clearing.
 ## Verifying
 
 ```bash
-driftguard verify [--dir .driftguard/attestations] [--require <file>...] [--json]
+slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
 ```
 
 Exit code 0 means every attested file matches and every verdict passes. Exit

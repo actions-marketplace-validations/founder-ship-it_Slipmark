@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Minimal DriftGuard CLI.
+ * Minimal Slipmark CLI.
  *
- *   driftguard <pack.ts|pack.js> [--git <git-context.json>] [--prompts]
- *   driftguard attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]
- *   driftguard verify [--dir .driftguard/attestations] [--require <file>...] [--json]
+ *   slipmark <pack.ts|pack.js> [--git <git-context.json>] [--prompts]
+ *   slipmark attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]
+ *   slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
  *
  * Loads a pack module (default export OR a named *Pack export), runs every lock,
  * prints a summary, and (with --prompts) prints the repair prompt for each drift.
@@ -22,7 +22,7 @@ import { createAttestation, writeAttestation, defaultAttestationPath, verifyAtte
 import { existsSync } from "node:fs";
 
 function fail(msg: string): never {
-  console.error(`driftguard: ${msg}`);
+  console.error(`slipmark: ${msg}`);
   process.exit(2);
 }
 
@@ -55,15 +55,15 @@ function argVal(args: string[], flag: string): string | null {
   return i >= 0 ? (args[i + 1] ?? null) : null;
 }
 
-/** `driftguard bisect --range <range> --command <cmd> [--cwd <dir>]` */
+/** `slipmark bisect --range <range> --command <cmd> [--cwd <dir>]` */
 async function bisectMain(args: string[]): Promise<void> {
   const range = argVal(args, "--range");
   const command = argVal(args, "--command");
   const cwd = argVal(args, "--cwd") ?? process.cwd();
   if (!range || !command) {
-    fail('usage: driftguard bisect --range <git-range> --command "<probe cmd, exit 0 = pass>" [--cwd <dir>]');
+    fail('usage: slipmark bisect --range <git-range> --command "<probe cmd, exit 0 = pass>" [--cwd <dir>]');
   }
-  console.log(`\nDriftGuard bisect — range \`${range}\`\n  probe: ${command}\n`);
+  console.log(`\nSlipmark bisect — range \`${range}\`\n  probe: ${command}\n`);
   const result = await runGitBisect({ cwd, range: range!, command: command! });
   if (!result.firstFailingCommit) {
     console.log(`  ✓ no regression in this range (newest commit still passes). ${result.evaluated} probes.\n`);
@@ -76,8 +76,8 @@ async function bisectMain(args: string[]): Promise<void> {
 }
 
 /**
- * `driftguard dashboard <pack> [--git f] [--history h.json] [--project name] --out file.html`
- * or render existing history: `driftguard dashboard --from h.json --out file.html`
+ * `slipmark dashboard <pack> [--git f] [--history h.json] [--project name] --out file.html`
+ * or render existing history: `slipmark dashboard --from h.json --out file.html`
  */
 async function dashboardMain(args: string[]): Promise<void> {
   const out = argVal(args, "--out") ?? "dashboard.html";
@@ -89,7 +89,7 @@ async function dashboardMain(args: string[]): Promise<void> {
     data = JSON.parse(readFileSync(resolve(from), "utf8")) as DashboardData;
   } else {
     const packPath = args.find((a) => !a.startsWith("--"));
-    if (!packPath) fail("usage: driftguard dashboard <pack> [--history h.json] --out f.html  |  driftguard dashboard --from h.json --out f.html");
+    if (!packPath) fail("usage: slipmark dashboard <pack> [--history h.json] --out f.html  |  slipmark dashboard --from h.json --out f.html");
     const pack = await loadPack(packPath!);
     const run = runPack(pack, loadGit(argVal(args, "--git")));
     const summary = summariseRun(run, { project: project ?? pack.id });
@@ -117,16 +117,16 @@ function argVals(args: string[], flag: string): string[] {
   return out;
 }
 
-/** `driftguard attest --by <agent> --verdict <v> --subject <file>... [--note t] [--out f] [--dir d]` */
+/** `slipmark attest --by <agent> --verdict <v> --subject <file>... [--note t] [--out f] [--dir d]` */
 function attestMain(args: string[]): void {
   const by = argVal(args, "--by");
   const verdict = argVal(args, "--verdict");
   const subjects = argVals(args, "--subject");
   if (!by || !verdict || subjects.length === 0) {
-    fail('usage: driftguard attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]');
+    fail('usage: slipmark attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]');
   }
   const att = createAttestation({ by: by!, verdict: verdict!, subjects, note: argVal(args, "--note") ?? undefined });
-  const dir = resolve(argVal(args, "--dir") ?? ".driftguard/attestations");
+  const dir = resolve(argVal(args, "--dir") ?? ".slipmark/attestations");
   const out = argVal(args, "--out") ? resolve(argVal(args, "--out")!) : defaultAttestationPath(dir, att);
   writeAttestation(out, att);
   console.log(`\n  ${att.by} → "${att.verdict}" on ${att.subjects.length} file(s)`);
@@ -134,7 +134,7 @@ function attestMain(args: string[]): void {
   console.log(`  written → ${out}\n`);
 }
 
-/** `driftguard verify [--dir d] [--require <file>...] [--json]` */
+/** `slipmark verify [--dir d] [--require <file>...] [--json]` */
 function verifyMain(args: string[]): void {
   const report = verifyAttestations({
     dir: argVal(args, "--dir") ?? undefined,
@@ -145,7 +145,7 @@ function verifyMain(args: string[]): void {
     process.exit(report.ok ? 0 : 1);
   }
   const passed = report.results.filter((r) => r.status === "verified").length;
-  console.log(`\nDriftGuard verify: ${passed} verified · ${report.failures.length} refused\n`);
+  console.log(`\nSlipmark verify: ${passed} verified · ${report.failures.length} refused\n`);
   for (const r of report.results) {
     const icon = r.status === "verified" ? "✓" : "✗";
     console.log(`  ${icon} ${r.status.padEnd(20)} ${r.message}`);
@@ -179,7 +179,7 @@ async function main() {
   }
 
   const packPath = args.find((a) => !a.startsWith("--"));
-  if (!packPath) fail("usage: driftguard <pack> [--git <file.json>] [--prompts] [--emit <dir>]  |  driftguard verify  |  driftguard attest ...  |  driftguard bisect --range <r> --command <cmd>");
+  if (!packPath) fail("usage: slipmark <pack> [--git <file.json>] [--prompts] [--emit <dir>]  |  slipmark verify  |  slipmark attest ...  |  slipmark bisect --range <r> --command <cmd>");
 
   const gitIdx = args.indexOf("--git");
   const gitPath = gitIdx >= 0 ? (args[gitIdx + 1] ?? null) : null;
@@ -190,7 +190,7 @@ async function main() {
   const pack = await loadPack(packPath!);
   const run = runPack(pack, loadGit(gitPath));
 
-  console.log(`\nDriftGuard — pack \`${run.packId}\``);
+  console.log(`\nSlipmark — pack \`${run.packId}\``);
   console.log(`  ${run.passed} passed · ${run.drifted} drifted · ${run.errored} errored (of ${run.total})\n`);
 
   for (const o of run.outcomes) {

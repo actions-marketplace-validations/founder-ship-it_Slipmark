@@ -3,7 +3,7 @@ dist/
 *.log
 # generated outputs (the committed dashboard/sample.html is intentional)
 /dashboard.html
-.driftguard/
+.slipmark/
 .DS_Store
 .env
 .env.*

@@ -1,6 +1,19 @@
 # Changelog
 
-All notable changes to DriftGuard are documented here.
+All notable changes to Slipmark (formerly DriftGuard) are documented here.
+
+## [0.2.0] - 2026-10-17
+
+### Changed (breaking)
+- **Renamed DriftGuard to Slipmark.** A slip mark is the paint line engineers
+  draw across a tightened bolt: if the bolt moves, the line breaks. "DriftGuard"
+  is a registered trade mark of other companies for related software.
+- CLI command `driftguard` is now `slipmark`.
+- Default attestation directory `.driftguard/attestations` is now
+  `.slipmark/attestations`.
+- Attestation schema `driftguard/attestation@1` is now `slipmark/attestation@1`.
+- GitHub Action: `uses: founder-ship-it/Slipmark@v0.2.0`.
+- New logo, social preview and Marketplace icon.
 
 ## [0.1.2] - 2026-10-17
 

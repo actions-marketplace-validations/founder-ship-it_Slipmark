@@ -1,5 +1,5 @@
 /**
- * DriftGuard — public API.
+ * Slipmark — public API.
  *
  * The engine is domain-agnostic. Supply a `Pack` (signatures, system map,
  * constraints, locks) and it will run the locks, detect drift, score confidence

@@ -21,7 +21,7 @@
           "severity": "high",
           "signatures": ["stale_intent_carryover"],
           "confidenceExplanation": "Confidence is high because bisection identified a specific culprit commit, and 1 watched symbol the lock depends on changed in the diff, and an execution trace corroborates the failing mechanism.",
-          "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\n\nMode: `suggest_patch` — High-confidence analysis.\nSeverity: `high`  ·  Confidence: `high` (86%)\nCommit range: `9a1f0b22` → `c7d3e914`\n\n## 4a. Causal evidence (earned, not heuristic)\n- Bisected culprit commit: `c7d3e914` introduced the failure.\n- Watched symbols changed: `composeReply`.\n- Trace observations: intentSourceUsed=\"first\", expectedIntentSource=\"latest\".\n\n## Required fix outcome\n- When the user pivots topic, the reply addresses the most recent intent.\n\nDo not edit the lock or fixtures to force a pass."
+          "repairPrompt": "# Slipmark repair prompt — support.latest_intent_wins\n\nMode: `suggest_patch` — High-confidence analysis.\nSeverity: `high`  ·  Confidence: `high` (86%)\nCommit range: `9a1f0b22` → `c7d3e914`\n\n## 4a. Causal evidence (earned, not heuristic)\n- Bisected culprit commit: `c7d3e914` introduced the failure.\n- Watched symbols changed: `composeReply`.\n- Trace observations: intentSourceUsed=\"first\", expectedIntentSource=\"latest\".\n\n## Required fix outcome\n- When the user pivots topic, the reply addresses the most recent intent.\n\nDo not edit the lock or fixtures to force a pass."
         },
         {
           "key": "support.no_invented_price",
@@ -58,7 +58,7 @@
       "drifted": 1,
       "errored": 0,
       "locks": [
-        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.4, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Capped at 40% — signature matched but no diff or trace yet.", "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\nMode: `minimal_fix`. Investigate the intent resolver." },
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.4, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Capped at 40% — signature matched but no diff or trace yet.", "repairPrompt": "# Slipmark repair prompt — support.latest_intent_wins\nMode: `minimal_fix`. Investigate the intent resolver." },
         { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null },
         { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
       ]
@@ -72,8 +72,8 @@
       "drifted": 2,
       "errored": 0,
       "locks": [
-        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.69, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Trace-only — mechanism known, commit not yet.", "repairPrompt": "# DriftGuard repair prompt — support.latest_intent_wins\nMode: `minimal_fix`." },
-        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "drift", "confidence": 0.72, "confidenceTier": "high", "severity": "high", "signatures": ["ungrounded_price_invention"], "confidenceExplanation": "Confidence is high because a changed file overlaps the pricing module.", "repairPrompt": "# DriftGuard repair prompt — support.no_invented_price\nMode: `suggest_patch`. Restore the price fallback." },
+        { "key": "support.latest_intent_wins", "name": "Latest intent wins after a topic pivot", "scope": "ai", "status": "drift", "confidence": 0.69, "confidenceTier": "medium", "severity": "high", "signatures": ["stale_intent_carryover"], "confidenceExplanation": "Trace-only — mechanism known, commit not yet.", "repairPrompt": "# Slipmark repair prompt — support.latest_intent_wins\nMode: `minimal_fix`." },
+        { "key": "support.no_invented_price", "name": "No invented price for unpriced items", "scope": "ai", "status": "drift", "confidence": 0.72, "confidenceTier": "high", "severity": "high", "signatures": ["ungrounded_price_invention"], "confidenceExplanation": "Confidence is high because a changed file overlaps the pricing module.", "repairPrompt": "# Slipmark repair prompt — support.no_invented_price\nMode: `suggest_patch`. Restore the price fallback." },
         { "key": "support.no_pii_leak", "name": "No PII leaked in replies", "scope": "tenancy", "status": "pass", "confidence": null, "confidenceTier": null, "severity": null, "signatures": [], "confidenceExplanation": null, "repairPrompt": null }
       ]
     },

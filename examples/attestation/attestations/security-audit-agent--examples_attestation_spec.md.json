@@ -1,5 +1,5 @@
 {
-  "schema": "driftguard/attestation@1",
+  "schema": "slipmark/attestation@1",
   "by": "security-audit-agent",
   "verdict": "cleared",
   "at": "2026-10-17T07:45:24.276Z",

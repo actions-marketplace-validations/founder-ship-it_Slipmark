@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in DriftGuard's engine, CLI, or authoring isn't behaving
+about: Something in Slipmark's engine, CLI, or authoring isn't behaving
 title: ""
 labels: bug
 ---
@@ -10,7 +10,7 @@ labels: bug
 **What you expected**
 
 **Repro**
-- DriftGuard version / commit:
+- Slipmark version / commit:
 - Node version:
 - Pack: TypeScript or JSON?
 - Minimal pack or command that reproduces it:

@@ -1,6 +1,6 @@
 # Concepts
 
-The mental model behind DriftGuard, in five ideas.
+The mental model behind Slipmark, in five ideas.
 
 ## 1. Lock
 
@@ -19,18 +19,18 @@ constraints, and locks. The engine imports nothing from your pack; it just
 receives it. Swap the pack, point the engine at a different product. ReplyOS is
 one pack; the e-commerce demo is another; yours is another.
 
-This is what makes DriftGuard a product and not a one-off script.
+This is what makes Slipmark a product and not a one-off script.
 
 ## 3. Signature
 
 A **signature** is a named, recognisable class of drift ("stale intent
-carryover", "ungrounded price invention"). When a lock fails, DriftGuard matches
+carryover", "ungrounded price invention"). When a lock fails, Slipmark matches
 the failure against your pack's signature library to name *what kind* of thing
 broke — which in turn points at the modules that class of bug usually lives in.
 
 ## 4. Earned confidence (the honesty model)
 
-DriftGuard refuses to present a guess as a fact. Confidence is gated by the
+Slipmark refuses to present a guess as a fact. Confidence is gated by the
 strength of the *causal evidence* available:
 
 | Evidence | Confidence ceiling | Meaning |
@@ -50,7 +50,7 @@ to *investigation mode* ("do not apply blind fixes"). Evidence sources:
 
 ## 5. Repair prompt
 
-When a lock drifts, DriftGuard emits a **mode-gated repair prompt** for a coding
+When a lock drifts, Slipmark emits a **mode-gated repair prompt** for a coding
 agent:
 
 - `suggest_patch` (high confidence) — propose concrete diffs, don't auto-apply.

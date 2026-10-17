@@ -12,7 +12,7 @@ test("coding-agent: a drift produces a repair artifact for the failing lock", ()
   const a = artifacts[0]!;
   assert.equal(a.lockKey, "shop.latest_intent_wins");
   assert.equal(a.filename, "shop.latest_intent_wins.repair.md");
-  assert.match(a.content, /DriftGuard repair prompt/);
+  assert.match(a.content, /Slipmark repair prompt/);
   assert.ok(a.promptMode.length > 0);
 });
 
@@ -27,11 +27,11 @@ test("coding-agent: the index doc links every artifact", () => {
 test("coding-agent: the rules doc encodes the non-negotiable safety rails", () => {
   const rules = agentRulesDoc();
   assert.match(rules, /investigate_first/);
-  assert.match(rules, /Never edit DriftGuard locks/i);
+  assert.match(rules, /Never edit Slipmark locks/i);
   assert.match(rules, /re-run the locks/i);
 });
 
 test("coding-agent: the Claude Code invocation helper is shaped correctly", () => {
-  const cmd = claudeCodeCommandFor(".driftguard/shop.latest_intent_wins.repair.md");
-  assert.equal(cmd, 'claude -p "$(cat .driftguard/shop.latest_intent_wins.repair.md)"');
+  const cmd = claudeCodeCommandFor(".slipmark/shop.latest_intent_wins.repair.md");
+  assert.equal(cmd, 'claude -p "$(cat .slipmark/shop.latest_intent_wins.repair.md)"');
 });

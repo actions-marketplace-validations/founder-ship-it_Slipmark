@@ -1,7 +1,7 @@
 /**
  * Demo pack: "ShopAssist" — an e-commerce support assistant.
  *
- * This pack carries ALL the domain knowledge. The DriftGuard engine imports
+ * This pack carries ALL the domain knowledge. The Slipmark engine imports
  * nothing from here; it just receives this object. Swapping this for the ReplyOS
  * pack (or any other) is the entire extensibility story.
  */
@@ -43,7 +43,7 @@ export const demoShopPack: Pack = definePack({
   baseConstraints: [
     "Do not change the support assistant's tone or break existing channel flows",
     "Do not introduce or auto-fix unrelated areas of the codebase",
-    "Do not change DriftGuard lock logic to make a failing lock pass",
+    "Do not change Slipmark lock logic to make a failing lock pass",
   ],
   scopeConstraints: {
     ai: [

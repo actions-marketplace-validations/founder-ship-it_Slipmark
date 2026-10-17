@@ -14,7 +14,7 @@
   },
   "baseConstraints": [
     "Do not change the assistant's tone or break existing channel flows",
-    "Do not change DriftGuard lock logic to make a failing lock pass"
+    "Do not change Slipmark lock logic to make a failing lock pass"
   ],
   "scopeConstraints": {
     "ai": ["Latest user intent must win over earlier topics in the composed reply"]

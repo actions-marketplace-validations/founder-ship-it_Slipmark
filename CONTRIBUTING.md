@@ -1,4 +1,4 @@
-# Contributing to DriftGuard
+# Contributing to Slipmark
 
 Thanks for helping protect AI features from silent regressions. This guide gets
 you productive fast.
@@ -35,7 +35,7 @@ src/
     codingAgent.ts    repair-artifact + AGENT_RULES emitters
     gitBisect.ts      git checkout/restore bisection adapter (Node)
     declarativeLoader.ts  JSON pack loader (Node)
-  cli.ts              the `driftguard` CLI
+  cli.ts              the `slipmark` CLI
 packs/                example packs (demo-shop, demo-shop-declarative)
 test/                 node:test suites
 ```
@@ -65,7 +65,7 @@ Every change needs a test. Run `npm test`. New engine behavior should assert the
 - Keep the engine dependency-free. New runtime dependencies need a strong reason.
 - Match the surrounding comment density and naming.
 
-## Non-negotiables (the things that make DriftGuard trustworthy)
+## Non-negotiables (the things that make Slipmark trustworthy)
 
 - Never make the engine present a heuristic as proof — respect the confidence caps.
 - Never let analysis fabricate a file/module/commit it didn't observe.

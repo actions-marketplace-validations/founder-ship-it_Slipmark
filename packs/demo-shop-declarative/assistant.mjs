@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Thin target script for the declarative demo: reads {"turns":[...]} as JSON on
 // stdin and prints the assistant reply on stdout. This stands in for "your AI
-// system" — DriftGuard does not care what language it is, only its output.
+// system" — Slipmark does not care what language it is, only its output.
 //
 // It carries the same planted regression (anchors on the FIRST user intent) so
 // the declarative pack has something to catch.

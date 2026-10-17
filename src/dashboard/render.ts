@@ -98,7 +98,7 @@ export function renderDashboardHtml(data: DashboardData): string {
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DriftGuard — ${esc(data.project)}</title>
+<title>Slipmark — ${esc(data.project)}</title>
 <style>
   :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   *{box-sizing:border-box}
@@ -161,6 +161,6 @@ export function renderDashboardHtml(data: DashboardData): string {
     <tbody>${history || '<tr><td colspan="5" class="muted">No runs.</td></tr>'}</tbody>
   </table></div>
 
-  <footer>DriftGuard — part of Reply Intelligence Group. Static preview; not connected to a backend.</footer>
+  <footer>Slipmark — part of Reply Intelligence Group. Static preview; not connected to a backend.</footer>
 </div></body></html>`;
 }

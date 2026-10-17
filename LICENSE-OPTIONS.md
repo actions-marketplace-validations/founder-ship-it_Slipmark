@@ -1,4 +1,4 @@
-# Licensing options for DriftGuard
+# Licensing options for Slipmark
 
 A reference so you can make an informed, unhurried decision. **Current license:
 Apache-2.0** (switched from MIT for v0.1.0, for the explicit patent grant). Changing it later is a one-line swap (plus this doc). Nothing here is legal
@@ -89,7 +89,7 @@ SaaS** directly from your code.
    team accounts, RBAC, and scale live in a **proprietary** backend only you run.
    Forking the open core does not give anyone your service.
 2. **Trademark.** Register the **name and logo**. Code can be copied; the identity
-   cannot. A fork legally cannot be "DriftGuard".
+   cannot. A fork legally cannot be "Slipmark".
 3. **Velocity + community + trust + integrations.** By the time anyone forks,
    you're ahead and you have the users. Forks of healthy projects rarely survive.
 
@@ -102,10 +102,10 @@ SaaS** directly from your code.
 | Still open source but block closed-SaaS clones | AGPL-3.0 (often dual-licensed) |
 | Maximum anti-clone, accept "not OSI open source" | BSL / Fair Source |
 
-For DriftGuard's stated strategy (open-core + cloud, venture-scale) the common
+For Slipmark's stated strategy (open-core + cloud, venture-scale) the common
 winning path is **Apache-2.0 core + closed cloud + trademarked name**, switching
 to AGPL/dual-license only if a copycat SaaS becomes a real, observed threat.
 
 ---
 
-*DriftGuard is part of Reply Intelligence Group.*
+*Slipmark is part of Reply Intelligence Group.*

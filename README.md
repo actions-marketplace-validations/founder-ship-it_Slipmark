@@ -1,27 +1,32 @@
-<p align="center"><img src="assets/logo.svg" width="112" alt="DriftGuard logo"></p>
+<p align="center"><img src="assets/logo.svg" width="112" alt="Slipmark logo"></p>
 
-# DriftGuard
+# Slipmark
 
-*A [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/driftguard) project.*
+*A [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/slipmark) project.*
 
 **Make AI agents prove what they checked.**
+
+A slip mark is the paint line engineers draw across a bolt once it has been
+tightened and checked. If the bolt ever moves, the line breaks and everyone can
+see it. Slipmark does the same for AI agent verdicts: once an agent signs off a
+file, any change after that breaks the mark.
 
 Agents now review code, audit specs and sign off their own work. The weak point
 is the verdict. An agent can report "passed" about a file that has since
 changed, or that it never looked at, and nothing downstream can tell.
 
-DriftGuard does two things:
+Slipmark does two things:
 
 1. **Verdict attestation.** Every agent verdict is bound to a SHA-256 hash of
    the exact files the agent read. Before anything ships, the gate re-hashes
    them. Mismatch, missing file, failing verdict, or nothing attested at all:
    it refuses. Deterministic, no model calls, one GitHub Action.
 2. **Drift diagnosis.** Behavioural "locks" for your AI features. When a change
-   breaks one, DriftGuard says what likely broke it, how sure it is (and refuses
+   breaks one, Slipmark says what likely broke it, how sure it is (and refuses
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.1.2`, early. Apache-2.0.
+> Status: `v0.2.0`, early. Apache-2.0.
 
 ## Why the gate exists
 
@@ -47,7 +52,7 @@ npm run demo          # drift diagnosis on the demo pack
 ```
 
 ```
-DriftGuard verify: 1 verified · 1 refused
+Slipmark verify: 1 verified · 1 refused
 
   ✓ verified             review-agent verified examples/attestation/brief.md
   ✗ hash_mismatch        security-audit-agent gave "cleared" for a different version of
@@ -60,15 +65,15 @@ DriftGuard verify: 1 verified · 1 refused
 that gives a verdict:
 
 ```bash
-driftguard attest --by security-audit-agent --verdict cleared \
+slipmark attest --by security-audit-agent --verdict cleared \
   --subject specs/invoice-export.md --subject src/export.ts
 ```
 
-That writes `.driftguard/attestations/<agent>--<file>.json`:
+That writes `.slipmark/attestations/<agent>--<file>.json`:
 
 ```json
 {
-  "schema": "driftguard/attestation@1",
+  "schema": "slipmark/attestation@1",
   "by": "security-audit-agent",
   "verdict": "cleared",
   "at": "2026-10-17T09:00:00.000Z",
@@ -81,7 +86,7 @@ That writes `.driftguard/attestations/<agent>--<file>.json`:
 **2. The gate checks it before anything ships.**
 
 ```bash
-driftguard verify --require specs/invoice-export.md
+slipmark verify --require specs/invoice-export.md
 ```
 
 | Result | Meaning |
@@ -100,7 +105,7 @@ silent pass. `--json` prints the full report for other tools.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/DriftGuard@v0.1.2
+- uses: founder-ship-it/Slipmark@v0.2.0
   with:
     require: |
       specs/invoice-export.md
@@ -118,7 +123,7 @@ More in [docs/attestation.md](./docs/attestation.md).
 ## Drift diagnosis: why it's different
 
 Most AI-eval / observability tools focus on **detection** (score outputs, flag a
-regression, draw a dashboard). DriftGuard's distinctive half is **diagnosis +
+regression, draw a dashboard). Slipmark's distinctive half is **diagnosis +
 repair**, and it is deliberately honest about certainty.
 
 **Confidence is earned, not guessed — a three-tier honesty cap:**
@@ -138,7 +143,7 @@ repair**, and it is deliberately honest about certainty.
 
 ### Earned causal evidence
 
-When the evidence exists, DriftGuard surfaces the smoking gun, not a guess:
+When the evidence exists, Slipmark surfaces the smoking gun, not a guess:
 
 - **Execution traces** — a lock instruments itself (modules/symbols exercised,
   observations like `intentSourceUsed="first"`), so diagnosis is backed by what
@@ -155,10 +160,10 @@ When the evidence exists, DriftGuard surfaces the smoking gun, not a guess:
 
 The demo (`packs/demo-shop`) is an e-commerce support assistant — **deliberately
 not the original product** — to prove the engine generalizes. It ships with one
-planted regression so you can watch DriftGuard catch and diagnose it.
+planted regression so you can watch Slipmark catch and diagnose it.
 
 ```
-DriftGuard — pack `demo-shop`
+Slipmark — pack `demo-shop`
   1 passed · 1 drifted · 0 errored (of 2)
   ✗ shop.latest_intent_wins — drift
       cause: Likely: stale intent carryover …  Probable hot-spot: `…/shopAssist.ts` (85% relevance).
@@ -188,7 +193,7 @@ DriftAnalysisReport  (cause, ranked files/modules, confidence, repair prompt)
 ### 1. Config-only (JSON, no code) — the fastest start
 
 Define a pack in plain JSON and point each lock at a target command that emits
-your AI's output. DriftGuard runs the command with your fixture on stdin and
+your AI's output. Slipmark runs the command with your fixture on stdin and
 asserts on stdout — it does not care what language your system is in:
 
 ```jsonc
@@ -211,7 +216,7 @@ asserts on stdout — it does not care what language your system is in:
 ```
 
 ```bash
-driftguard ./drift.pack.json --emit .driftguard
+slipmark ./drift.pack.json --emit .slipmark
 ```
 
 Assertion types: `contains`, `not_contains`, `matches`, `not_matches`, `equals`,
@@ -228,7 +233,7 @@ in-process targets, define a `Pack` in TypeScript.
 The engine imports nothing domain-specific. A `Pack` carries it all:
 
 ```ts
-import { definePack } from "driftguard";
+import { definePack } from "slipmark";
 
 export const myPack = definePack({
   id: "my-product",
@@ -251,11 +256,11 @@ the whole point of the standalone extraction.
 ## CLI
 
 ```bash
-driftguard <pack.js> [--git <git-context.json>] [--prompts] [--emit <dir>]
-driftguard attest --by <agent> --verdict <pass|cleared|fail> --subject <file>... [--note "..."] [--out <file>]
-driftguard verify [--dir .driftguard/attestations] [--require <file>...] [--json]
-driftguard bisect --range <git-range> --command "<probe>"
-driftguard dashboard <pack> --history <h.json> --out <file.html>
+slipmark <pack.js> [--git <git-context.json>] [--prompts] [--emit <dir>]
+slipmark attest --by <agent> --verdict <pass|cleared|fail> --subject <file>... [--note "..."] [--out <file>]
+slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
+slipmark bisect --range <git-range> --command "<probe>"
+slipmark dashboard <pack> --history <h.json> --out <file.html>
 ```
 
 Exits non-zero if any lock drifts or errors, so it gates CI. Pass a git context
@@ -269,7 +274,7 @@ probe command (exit 0 = the lock passes); it binary-searches the commit that
 introduced the regression and restores your working tree afterward:
 
 ```bash
-driftguard bisect --range "main~30..main" \
+slipmark bisect --range "main~30..main" \
   --command "npm run build --silent && node dist/src/cli.js dist/packs/demo-shop/pack.js"
 ```
 
@@ -279,22 +284,22 @@ driftguard bisect --range "main~30..main" \
     probes evaluated:    5          # not 30 — ~log2(n)
 ```
 
-A bisected culprit is the strongest causal evidence DriftGuard has: it lifts the
+A bisected culprit is the strongest causal evidence Slipmark has: it lifts the
 confidence cap and the precise commit range flows into the repair prompt.
 
 ## Dashboard (preview of the hosted cloud)
 
-DriftGuard renders a self-contained HTML dashboard — drift trend over runs, lock
+Slipmark renders a self-contained HTML dashboard — drift trend over runs, lock
 status, confidence bars, and drill-down repair prompts. Today it is backed by a
 local run-history JSON file; the hosted cloud will serve the same view from a
 database + API.
 
 ```bash
 # Run a pack and append the result to a rolling history, then render the dashboard:
-driftguard dashboard ./drift.pack.json --history .driftguard/history.json --out dashboard.html
+slipmark dashboard ./drift.pack.json --history .slipmark/history.json --out dashboard.html
 
 # Or render an existing history file:
-driftguard dashboard --from dashboard/sample-history.json --out dashboard/sample.html
+slipmark dashboard --from dashboard/sample-history.json --out dashboard/sample.html
 ```
 
 The `--history` file accumulates runs over time — that flat file is exactly the
@@ -308,16 +313,16 @@ rendered example.
 - `<lockKey>.repair.md` — the ready-to-run repair prompt
 - `index.md` — a summary linking every repair
 - `AGENT_RULES.md` — drop into `.cursor/rules/` or `CLAUDE.md` so any coding
-  agent treats DriftGuard prompts safely (respect investigation mode, never edit
+  agent treats Slipmark prompts safely (respect investigation mode, never edit
   locks to force a pass, re-run locks after changes)
 
 Hand a prompt to Claude Code headlessly:
 
 ```bash
-claude -p "$(cat .driftguard/shop.latest_intent_wins.repair.md)"
+claude -p "$(cat .slipmark/shop.latest_intent_wins.repair.md)"
 ```
 
-This is the wedge: most tools tell you a metric dropped. DriftGuard tells your
+This is the wedge: most tools tell you a metric dropped. Slipmark tells your
 agent *what likely broke it* and *how to fix it safely* — and refuses to do so
 overconfidently when the evidence isn't there.
 
@@ -328,14 +333,14 @@ overconfidently when the evidence isn't there.
    earned, three-tier confidence model. ✅
 2. **Coding-agent integration — built.** `--emit` writes repair prompts +
    `AGENT_RULES`. ✅
-3. **Bisection host adapter — built.** `driftguard bisect` / `runGitBisect`
+3. **Bisection host adapter — built.** `slipmark bisect` / `runGitBisect`
    checks out real commits, runs a probe, and restores the tree. ✅
 4. **Self-serve authoring — built.** Define packs in plain JSON with target
    commands and declarative assertions — no TypeScript required. ✅
 5. **Dashboard view — built (static).** Self-contained HTML dashboard with drift
    trend, lock status, and drill-down repair prompts, backed by a run-history
    JSON. ✅
-6. **Verdict attestation, built.** `driftguard attest` / `verify` and a
+6. **Verdict attestation, built.** `slipmark attest` / `verify` and a
    GitHub Action bind agent verdicts to SHA-256 hashes and refuse on mismatch. ✅
 7. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
    add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
@@ -357,4 +362,4 @@ behind the choice is in [LICENSE-OPTIONS.md](./LICENSE-OPTIONS.md).
 
 ---
 
-DriftGuard is built by [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/driftguard), Watford, UK. © 2026 Reply Intelligence Group Ltd.
+Slipmark is built by [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/slipmark), Watford, UK. © 2026 Reply Intelligence Group Ltd.

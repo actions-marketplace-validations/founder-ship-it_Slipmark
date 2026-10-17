@@ -1,5 +1,5 @@
 /**
- * Structured confidence scoring + the honesty guarantees that make DriftGuard
+ * Structured confidence scoring + the honesty guarantees that make Slipmark
  * different: it refuses to present pattern heuristics as proof.
  *
  *   - Confidence is hard-capped at 0.40 when there is no git diff and no
@@ -144,7 +144,7 @@ export function explainConfidence(params: {
 
   if (!hasCausalEvidence && !hasExecutionTrace) {
     return [
-      "Confidence is capped at 40% because DriftGuard had no git diff, no execution trace, and no bisected commit for this run.",
+      "Confidence is capped at 40% because Slipmark had no git diff, no execution trace, and no bisected commit for this run.",
       topSignatureKey
         ? `A failure signature (\`${topSignatureKey}\`) matched the assertion pattern, but signature heuristics alone are not treated as proof.`
         : "No known failure signature matched — treat the candidate modules as hypotheses only.",
@@ -153,7 +153,7 @@ export function explainConfidence(params: {
 
   if (!hasCausalEvidence) {
     return [
-      "Confidence is capped at 69% (medium) because DriftGuard has an execution trace of the failing mechanism but no git diff or bisected commit linking it to a specific change.",
+      "Confidence is capped at 69% (medium) because Slipmark has an execution trace of the failing mechanism but no git diff or bisected commit linking it to a specific change.",
       "The trace tells us what went wrong; it does not yet tell us which change caused it.",
     ].join(" ");
   }

@@ -21,7 +21,7 @@ function repo(): string {
   return root;
 }
 
-const DIR = ".driftguard/attestations";
+const DIR = ".slipmark/attestations";
 
 function attest(root: string, subjects: string[], verdict = "pass", by = "security-audit") {
   const att = createAttestation({ root, subjects, verdict, by, now: new Date("2026-10-17T09:00:00Z") });

@@ -1,20 +1,20 @@
 {
-  "name": "driftguard",
-  "version": "0.1.2",
+  "name": "slipmark",
+  "version": "0.2.0",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
-  "homepage": "https://www.replyintelligencegroup.co.uk/products/driftguard",
+  "homepage": "https://www.replyintelligencegroup.co.uk/products/slipmark",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/founder-ship-it/DriftGuard.git"
+    "url": "git+https://github.com/founder-ship-it/Slipmark.git"
   },
   "bugs": {
-    "url": "https://github.com/founder-ship-it/DriftGuard/issues"
+    "url": "https://github.com/founder-ship-it/Slipmark/issues"
   },
   "type": "module",
   "license": "Apache-2.0",
   "author": "Reply Intelligence Group Ltd",
   "bin": {
-    "driftguard": "dist/src/cli.js"
+    "slipmark": "dist/src/cli.js"
   },
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",

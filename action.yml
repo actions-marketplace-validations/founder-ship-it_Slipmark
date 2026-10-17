@@ -1,4 +1,4 @@
-name: "DriftGuard verify"
+name: "Slipmark verify"
 description: "Refuse to ship unless every AI agent verdict matches the exact files it read (SHA-256 attestation gate)."
 author: "Reply Intelligence Group"
 branding:
@@ -9,7 +9,7 @@ inputs:
   dir:
     description: "Directory of attestation files, relative to the repository root."
     required: false
-    default: ".driftguard/attestations"
+    default: ".slipmark/attestations"
   require:
     description: "Files that must be covered by a passing, current attestation. One path per line."
     required: false
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: "."
   fail-on-refusal:
-    description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll DriftGuard out."
+    description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll Slipmark out."
     required: false
     default: "true"
 
@@ -34,7 +34,7 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: "22"
-    - name: Build DriftGuard
+    - name: Build Slipmark
       shell: bash
       working-directory: ${{ github.action_path }}
       run: npm ci --no-audit --no-fund && npm run build
@@ -64,11 +64,11 @@ runs:
         fi
         echo "result=refused" >> "$GITHUB_OUTPUT"
         if [ "$code" -ne 1 ]; then
-          echo "::error title=DriftGuard::verify could not run (exit $code)"
+          echo "::error title=Slipmark::verify could not run (exit $code)"
           exit "$code"
         fi
         if [ "$DG_FAIL" = "false" ]; then
-          echo "::warning title=DriftGuard::Gate refused (report-only mode, not failing the build)"
+          echo "::warning title=Slipmark::Gate refused (report-only mode, not failing the build)"
           exit 0
         fi
         exit 1

@@ -1,7 +1,7 @@
 /**
  * Coding-agent integration.
  *
- * DriftGuard's headline differentiator: when a lock drifts, hand a coding agent
+ * Slipmark's headline differentiator: when a lock drifts, hand a coding agent
  * (Cursor, Claude Code, Copilot, etc.) a ready-to-run repair prompt — and the
  * guard rails for how to act on it safely.
  *
@@ -38,7 +38,7 @@ export function repairArtifactsFor(run: VerificationRun): RepairArtifact[] {
 /** An index file linking all repair artifacts in a run. */
 export function repairIndexDoc(run: VerificationRun, artifacts: RepairArtifact[]): string {
   const lines = [
-    `# DriftGuard repairs — pack \`${run.packId}\``,
+    `# Slipmark repairs — pack \`${run.packId}\``,
     "",
     `${run.passed} passed · ${run.drifted} drifted · ${run.errored} errored (of ${run.total}).`,
     "",
@@ -64,22 +64,22 @@ export function claudeCodeCommandFor(promptPath: string): string {
 }
 
 /**
- * A rules doc to drop into a repo (e.g. `.cursor/rules/driftguard.md` or
- * `CLAUDE.md`) so any coding agent treats DriftGuard repair prompts safely.
- * Encodes the non-negotiables that make DriftGuard trustworthy.
+ * A rules doc to drop into a repo (e.g. `.cursor/rules/slipmark.md` or
+ * `CLAUDE.md`) so any coding agent treats Slipmark repair prompts safely.
+ * Encodes the non-negotiables that make Slipmark trustworthy.
  */
 export function agentRulesDoc(): string {
   return [
-    "# DriftGuard — rules for coding agents",
+    "# Slipmark — rules for coding agents",
     "",
-    "When you are given a file named `*.repair.md` produced by DriftGuard, follow these rules:",
+    "When you are given a file named `*.repair.md` produced by Slipmark, follow these rules:",
     "",
     "1. **Respect the declared mode.**",
     "   - `investigate_first` (low confidence): DO NOT edit product code. Produce a diagnosis,",
     "     not a patch. Ranked files are intentionally withheld — do not invent them.",
     "   - `minimal_fix` (medium): apply the smallest reversible change in the top-ranked area only.",
     "   - `suggest_patch` (high): you may propose concrete diffs, but do not auto-apply them.",
-    "2. **Never edit DriftGuard locks, fixtures, or assertions to make a failing lock pass.**",
+    "2. **Never edit Slipmark locks, fixtures, or assertions to make a failing lock pass.**",
     "   That is gaming the test, not fixing the bug.",
     "3. **Stay inside the ranked likely-cause area.** Do not refactor unrelated modules.",
     "4. **Treat anything labelled 'likely' / 'probable' / 'inferred' as a hypothesis** — confirm",

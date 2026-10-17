@@ -58,7 +58,7 @@ test("dashboard: renders self-contained HTML and escapes untrusted content", () 
   assert.match(html, /<!doctype html>/i);
   assert.match(html, /my-product/);
   assert.match(html, /x\.lock/);
-  assert.match(html, /DriftGuard/);
+  assert.match(html, /Slipmark/);
   // Untrusted repair-prompt content must be escaped, not injected raw.
   assert.ok(!html.includes("<script>alert(1)"), "must not inject raw script");
   assert.match(html, /&lt;script&gt;alert\(1\)/);
