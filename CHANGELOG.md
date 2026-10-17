@@ -2,6 +2,12 @@
 
 All notable changes to DriftGuard are documented here.
 
+## [0.1.2] - 2026-10-17
+
+### Changed
+- Brand: RIG-style logo and social preview in `assets/`; Marketplace icon is now
+  `hash` in `gray-dark` to match.
+
 ## [0.1.1] - 2026-10-17
 
 ### Added

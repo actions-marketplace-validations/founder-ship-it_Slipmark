@@ -2,8 +2,8 @@ name: "DriftGuard verify"
 description: "Refuse to ship unless every AI agent verdict matches the exact files it read (SHA-256 attestation gate)."
 author: "Reply Intelligence Group"
 branding:
-  icon: "shield"
-  color: "blue"
+  icon: "hash"
+  color: "gray-dark"
 
 inputs:
   dir:

@@ -21,7 +21,7 @@ DriftGuard does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.1.1`, early. Apache-2.0.
+> Status: `v0.1.2`, early. Apache-2.0.
 
 ## Why the gate exists
 
@@ -100,7 +100,7 @@ silent pass. `--json` prints the full report for other tools.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/DriftGuard@v0.1.1
+- uses: founder-ship-it/DriftGuard@v0.1.2
   with:
     require: |
       specs/invoice-export.md
