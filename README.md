@@ -19,7 +19,7 @@ DriftGuard does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.1.0`, early. Apache-2.0.
+> Status: `v0.1.1`, early. Apache-2.0.
 
 ## Why the gate exists
 
@@ -98,11 +98,15 @@ silent pass. `--json` prints the full report for other tools.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/driftguard@v0.1.0
+- uses: founder-ship-it/DriftGuard@v0.1.1
   with:
     require: |
       specs/invoice-export.md
 ```
+
+Rolling it out gently? Set `fail-on-refusal: "false"` to report refusals as
+warnings without failing the build. The step's `result` output is `passed` or
+`refused` either way.
 
 Run it on the branch you are about to merge. Because it checks content, not
 branch names, a verdict produced on one branch can't clear a different tree.

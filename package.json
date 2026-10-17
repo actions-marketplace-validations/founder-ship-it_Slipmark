@@ -1,6 +1,6 @@
 {
   "name": "driftguard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
   "type": "module",
   "license": "Apache-2.0",

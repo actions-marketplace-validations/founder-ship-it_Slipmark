@@ -2,6 +2,16 @@
 
 All notable changes to DriftGuard are documented here.
 
+## [0.1.1] - 2026-10-17
+
+### Added
+- Action output `result` (`passed` or `refused`) and a report-only mode,
+  `fail-on-refusal: "false"`, for rolling DriftGuard out without blocking builds.
+
+### Changed
+- CI demo steps now pass only when DriftGuard refuses the planted problems,
+  instead of showing as errors on the Actions page.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added
