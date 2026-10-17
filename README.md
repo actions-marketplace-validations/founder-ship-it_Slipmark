@@ -2,7 +2,7 @@
 
 # DriftGuard
 
-*A Reply Intelligence Group project.*
+*A [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/driftguard) project.*
 
 **Make AI agents prove what they checked.**
 
@@ -357,4 +357,4 @@ behind the choice is in [LICENSE-OPTIONS.md](./LICENSE-OPTIONS.md).
 
 ---
 
-DriftGuard is part of **Reply Intelligence Group**. © 2026 Reply Intelligence Group.
+DriftGuard is built by [Reply Intelligence Group](https://www.replyintelligencegroup.co.uk/products/driftguard), Watford, UK. © 2026 Reply Intelligence Group Ltd.

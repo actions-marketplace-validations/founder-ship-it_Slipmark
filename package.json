@@ -2,6 +2,14 @@
   "name": "driftguard",
   "version": "0.1.2",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
+  "homepage": "https://www.replyintelligencegroup.co.uk/products/driftguard",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/founder-ship-it/DriftGuard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/founder-ship-it/DriftGuard/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "author": "Reply Intelligence Group Ltd",
