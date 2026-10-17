@@ -1,0 +1,8 @@
+<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DriftGuard">
+  <rect width="40" height="40" fill="#f8f6f2"/>
+  <rect x="0.75" y="0.75" width="38.5" height="38.5" stroke="#1e3a34" stroke-width="1.5"/>
+  <rect x="14" y="9" width="3" height="22" fill="#1e3a34"/>
+  <rect x="23" y="9" width="3" height="22" fill="#1e3a34"/>
+  <rect x="9" y="14" width="22" height="3" fill="#1e3a34"/>
+  <rect x="9" y="23" width="22" height="3" fill="#1e3a34"/>
+</svg>

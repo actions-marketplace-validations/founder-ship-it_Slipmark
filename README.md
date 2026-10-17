@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="112" alt="DriftGuard logo"></p>
+
 # DriftGuard
 
 *A Reply Intelligence Group project.*
