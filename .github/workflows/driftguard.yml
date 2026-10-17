@@ -19,24 +19,40 @@ jobs:
       - run: npm run build
       - name: Type-check and unit tests
         run: npm test
-      - name: DriftGuard demo (informational)
-        # The demo pack ships a PLANTED bug, so it intentionally drifts and the CLI
-        # exits non-zero. That is expected here — it's a teaching example, not a gate.
-        # In a real project you DO want this to fail CI on drift (drop continue-on-error).
-        continue-on-error: true
-        run: node dist/src/cli.js dist/packs/demo-shop/pack.js
-      - name: Attestation gate demo (informational)
-        # The example ships one stale verdict on purpose, so the gate refuses.
-        continue-on-error: true
-        run: node dist/src/cli.js verify --dir examples/attestation/attestations
-      - name: The Action itself, against the example (must refuse)
+
+      # The demos below are built to be refused. Each step passes only when
+      # DriftGuard catches the planted problem, and fails if it lets it through.
+      # In your own project, drop these and let a refusal fail the build.
+
+      - name: "Demo: drift diagnosis catches the planted bug"
+        run: |
+          set +e
+          node dist/src/cli.js dist/packs/demo-shop/pack.js
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then echo "::error::Expected the demo pack to drift (exit 1), got exit $code"; exit 1; fi
+          echo "::notice title=Demo::Drift caught, as expected"
+
+      - name: "Demo: verify refuses the stale verdict"
+        run: |
+          set +e
+          node dist/src/cli.js verify --dir examples/attestation/attestations
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then echo "::error::Expected verify to refuse (exit 1), got exit $code"; exit 1; fi
+          echo "::notice title=Demo::Stale verdict refused, as expected"
+
+      - name: "Demo: the GitHub Action refuses the stale verdict"
         id: action_demo
-        continue-on-error: true
         uses: ./
         with:
           dir: examples/attestation/attestations
-      - name: Fail if the Action did not refuse the stale verdict
-        if: steps.action_demo.outcome != 'failure'
+          fail-on-refusal: "false"
+
+      - name: "Check: the Action reported a refusal"
+        env:
+
+          RESULT: ${{ steps.action_demo.outputs.result }}
         run: |
-          echo "The attestation gate passed a stale verdict. It must refuse."
-          exit 1
+          if [ "$RESULT" != "refused" ]; then echo "::error::The Action let a stale verdict through (result=$RESULT)"; exit 1; fi
+          echo "::notice title=Demo::Action refused the stale verdict, as expected"
