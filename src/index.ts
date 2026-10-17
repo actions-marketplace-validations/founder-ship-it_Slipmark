@@ -38,6 +38,16 @@ export { loadDeclarativePack } from "./integrations/declarativeLoader.js";
 export { summariseRun, appendRun } from "./dashboard/data.js";
 export type { DashboardData, RunSummary, LockSummary } from "./dashboard/data.js";
 export { renderDashboardHtml } from "./dashboard/render.js";
+export {
+  ATTESTATION_SCHEMA,
+  PASSING_VERDICTS,
+  createAttestation,
+  writeAttestation,
+  defaultAttestationPath,
+  verifyAttestations,
+  sha256File,
+} from "./attest/attestation.js";
+export type { Attestation, AttestedSubject, Verdict, CheckResult, CheckStatus, VerifyReport } from "./attest/attestation.js";
 
 export {
   repairArtifactsFor,

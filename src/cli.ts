@@ -3,6 +3,8 @@
  * Minimal DriftGuard CLI.
  *
  *   driftguard <pack.ts|pack.js> [--git <git-context.json>] [--prompts]
+ *   driftguard attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]
+ *   driftguard verify [--dir .driftguard/attestations] [--require <file>...] [--json]
  *
  * Loads a pack module (default export OR a named *Pack export), runs every lock,
  * prints a summary, and (with --prompts) prints the repair prompt for each drift.
@@ -16,6 +18,7 @@ import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeC
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 import type { DashboardData } from "./dashboard/data.js";
+import { createAttestation, writeAttestation, defaultAttestationPath, verifyAttestations } from "./attest/attestation.js";
 import { existsSync } from "node:fs";
 
 function fail(msg: string): never {
@@ -106,11 +109,68 @@ async function dashboardMain(args: string[]): Promise<void> {
   console.log(`  open it: file://${resolve(out)}\n`);
 }
 
+function argVals(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  args.forEach((a, i) => {
+    if (a === flag && args[i + 1] !== undefined) out.push(args[i + 1]!);
+  });
+  return out;
+}
+
+/** `driftguard attest --by <agent> --verdict <v> --subject <file>... [--note t] [--out f] [--dir d]` */
+function attestMain(args: string[]): void {
+  const by = argVal(args, "--by");
+  const verdict = argVal(args, "--verdict");
+  const subjects = argVals(args, "--subject");
+  if (!by || !verdict || subjects.length === 0) {
+    fail('usage: driftguard attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]');
+  }
+  const att = createAttestation({ by: by!, verdict: verdict!, subjects, note: argVal(args, "--note") ?? undefined });
+  const dir = resolve(argVal(args, "--dir") ?? ".driftguard/attestations");
+  const out = argVal(args, "--out") ? resolve(argVal(args, "--out")!) : defaultAttestationPath(dir, att);
+  writeAttestation(out, att);
+  console.log(`\n  ${att.by} → "${att.verdict}" on ${att.subjects.length} file(s)`);
+  for (const s of att.subjects) console.log(`    ${s.sha256.slice(0, 12)}  ${s.path}`);
+  console.log(`  written → ${out}\n`);
+}
+
+/** `driftguard verify [--dir d] [--require <file>...] [--json]` */
+function verifyMain(args: string[]): void {
+  const report = verifyAttestations({
+    dir: argVal(args, "--dir") ?? undefined,
+    require: argVals(args, "--require"),
+  });
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    process.exit(report.ok ? 0 : 1);
+  }
+  const passed = report.results.filter((r) => r.status === "verified").length;
+  console.log(`\nDriftGuard verify: ${passed} verified · ${report.failures.length} refused\n`);
+  for (const r of report.results) {
+    const icon = r.status === "verified" ? "✓" : "✗";
+    console.log(`  ${icon} ${r.status.padEnd(20)} ${r.message}`);
+    if (r.status === "hash_mismatch") {
+      console.log(`      attested: ${r.expected}`);
+      console.log(`      now:      ${r.actual}`);
+    }
+  }
+  console.log(report.ok ? "\n  Every verdict matches the files as they are now.\n" : "\n  Gate refused. Re-run the agent on the current files, or fix the input.\n");
+  process.exit(report.ok ? 0 : 1);
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
   if (args[0] === "bisect") {
     await bisectMain(args.slice(1));
+    return;
+  }
+  if (args[0] === "attest") {
+    attestMain(args.slice(1));
+    return;
+  }
+  if (args[0] === "verify") {
+    verifyMain(args.slice(1));
     return;
   }
   if (args[0] === "dashboard") {
@@ -119,7 +179,7 @@ async function main() {
   }
 
   const packPath = args.find((a) => !a.startsWith("--"));
-  if (!packPath) fail("usage: driftguard <pack> [--git <file.json>] [--prompts] [--emit <dir>]  |  driftguard bisect --range <r> --command <cmd>");
+  if (!packPath) fail("usage: driftguard <pack> [--git <file.json>] [--prompts] [--emit <dir>]  |  driftguard verify  |  driftguard attest ...  |  driftguard bisect --range <r> --command <cmd>");
 
   const gitIdx = args.indexOf("--git");
   const gitPath = gitIdx >= 0 ? (args[gitIdx + 1] ?? null) : null;

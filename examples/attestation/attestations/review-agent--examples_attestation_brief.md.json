@@ -1,0 +1,12 @@
+{
+  "schema": "driftguard/attestation@1",
+  "by": "review-agent",
+  "verdict": "pass",
+  "at": "2026-10-17T07:45:24.341Z",
+  "subjects": [
+    {
+      "path": "examples/attestation/brief.md",
+      "sha256": "53b1a91aeeffc5f70e936d32c34f238aa22220d4e309132725dbb490a5e7b840"
+    }
+  ]
+}

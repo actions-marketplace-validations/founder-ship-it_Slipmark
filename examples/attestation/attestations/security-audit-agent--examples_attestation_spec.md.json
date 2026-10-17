@@ -1,0 +1,13 @@
+{
+  "schema": "driftguard/attestation@1",
+  "by": "security-audit-agent",
+  "verdict": "cleared",
+  "at": "2026-10-17T07:45:24.276Z",
+  "subjects": [
+    {
+      "path": "examples/attestation/spec.md",
+      "sha256": "20967db381f855a3fb6fdc30643e253bf66f62c997596a4d41c6bcfe7d064cb8"
+    }
+  ],
+  "note": "Demo: this verdict was given on an earlier version of spec.md, so the gate must refuse it."
+}

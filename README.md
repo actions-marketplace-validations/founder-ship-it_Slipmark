@@ -2,23 +2,114 @@
 
 *A Reply Intelligence Group project.*
 
-**Regression locks + honest failure diagnosis for AI/LLM features.**
+**Make AI agents prove what they checked.**
 
-Define behavioral invariants ("locks") for your AI features. When a code or
-prompt change makes one fail, DriftGuard tells you *what likely broke it*, how
-confident it is (and refuses to fake confidence it doesn't have), and hands your
-coding agent a ready-to-run **repair prompt**.
+Agents now review code, audit specs and sign off their own work. The weak point
+is the verdict. An agent can report "passed" about a file that has since
+changed, or that it never looked at, and nothing downstream can tell.
 
-It is **CI-first** and **domain-agnostic**: the engine knows nothing about your
-product. You supply a `Pack` (signatures, system map, constraints, locks) and the
-same engine works on any codebase.
+DriftGuard does two things:
 
-> Status: early scaffold (`v0.0.1`). The engine, confidence model, repair-prompt
-> generator, and a working non-product demo are in place. See the roadmap below.
+1. **Verdict attestation.** Every agent verdict is bound to a SHA-256 hash of
+   the exact files the agent read. Before anything ships, the gate re-hashes
+   them. Mismatch, missing file, failing verdict, or nothing attested at all:
+   it refuses. Deterministic, no model calls, one GitHub Action.
+2. **Drift diagnosis.** Behavioural "locks" for your AI features. When a change
+   breaks one, DriftGuard says what likely broke it, how sure it is (and refuses
+   to fake confidence it doesn't have), and hands your coding agent a repair
+   prompt.
 
----
+> Status: `v0.1.0`, early. Apache-2.0.
 
-## Why it's different
+## Why the gate exists
+
+We run a nightly pipeline of 20+ agents: research, architecture, security
+audit, build, QA. Every morning they reported what passed.
+
+Then we found the final verification job had been checking the wrong branch
+for months. It could not fail, so it never did. Months of green ticks, proving
+nothing.
+
+So we built the gate: bind every verdict to the hash of what it read, and
+re-check before shipping. Pointed at 23 open agent pull requests, it refused
+all 23.
+
+## Quick start
+
+```bash
+npm install
+npm run build
+npm test              # 31 tests, all green
+npm run demo:verify   # the attestation gate refusing a stale verdict
+npm run demo          # drift diagnosis on the demo pack
+```
+
+```
+DriftGuard verify: 1 verified · 1 refused
+
+  ✓ verified             review-agent verified examples/attestation/brief.md
+  ✗ hash_mismatch        security-audit-agent gave "cleared" for a different version of
+                         examples/attestation/spec.md. The file changed after the verdict.
+```
+
+## Verdict attestation
+
+**1. The agent attests what it read.** Call this at the end of any agent step
+that gives a verdict:
+
+```bash
+driftguard attest --by security-audit-agent --verdict cleared \
+  --subject specs/invoice-export.md --subject src/export.ts
+```
+
+That writes `.driftguard/attestations/<agent>--<file>.json`:
+
+```json
+{
+  "schema": "driftguard/attestation@1",
+  "by": "security-audit-agent",
+  "verdict": "cleared",
+  "at": "2026-10-17T09:00:00.000Z",
+  "subjects": [
+    { "path": "specs/invoice-export.md", "sha256": "cf89da70…" }
+  ]
+}
+```
+
+**2. The gate checks it before anything ships.**
+
+```bash
+driftguard verify --require specs/invoice-export.md
+```
+
+| Result | Meaning |
+|---|---|
+| `verified` | Passing verdict, and the file is byte-for-byte what the agent saw |
+| `hash_mismatch` | The file changed after the verdict. The verdict is about a different file. |
+| `subject_missing` | The attested file no longer exists |
+| `verdict_not_passing` | The agent said fail or blocked |
+| `unattested` | A `--require`d file has no current, passing verdict, or there are no attestations at all |
+| `invalid` | Malformed attestation, or a path outside the repo |
+
+Passing verdicts are `pass` and `cleared`. An empty gate is a refusal, never a
+silent pass. `--json` prints the full report for other tools.
+
+**As a GitHub Action:**
+
+```yaml
+- uses: actions/checkout@v4
+- uses: founder-ship-it/driftguard@v0.1.0
+  with:
+    require: |
+      specs/invoice-export.md
+```
+
+Run it on the branch you are about to merge. Because it checks content, not
+branch names, a verdict produced on one branch can't clear a different tree.
+
+More in [docs/attestation.md](./docs/attestation.md).
+
+## Drift diagnosis: why it's different
 
 Most AI-eval / observability tools focus on **detection** (score outputs, flag a
 regression, draw a dashboard). DriftGuard's distinctive half is **diagnosis +
@@ -54,14 +145,7 @@ When the evidence exists, DriftGuard surfaces the smoking gun, not a guess:
   on; when the diff changes one of them, that's earned evidence the specific code
   behind the behavior moved.
 
-## Quick start
-
-```bash
-npm install
-npm run build
-npm test           # 5 tests, all green
-npm run demo       # runs the non-product demo pack with a sample git diff
-```
+## The drift demo
 
 The demo (`packs/demo-shop`) is an e-commerce support assistant — **deliberately
 not the original product** — to prove the engine generalizes. It ships with one
@@ -162,6 +246,10 @@ the whole point of the standalone extraction.
 
 ```bash
 driftguard <pack.js> [--git <git-context.json>] [--prompts] [--emit <dir>]
+driftguard attest --by <agent> --verdict <pass|cleared|fail> --subject <file>... [--note "..."] [--out <file>]
+driftguard verify [--dir .driftguard/attestations] [--require <file>...] [--json]
+driftguard bisect --range <git-range> --command "<probe>"
+driftguard dashboard <pack> --history <h.json> --out <file.html>
 ```
 
 Exits non-zero if any lock drifts or errors, so it gates CI. Pass a git context
@@ -207,7 +295,7 @@ The `--history` file accumulates runs over time — that flat file is exactly th
 data model the cloud backend will persist. See `dashboard/sample.html` for a
 rendered example.
 
-## Coding-agent integration (the headline)
+## Coding-agent integration
 
 `--emit <dir>` writes, for each failing lock:
 
@@ -241,11 +329,14 @@ overconfidently when the evidence isn't there.
 5. **Dashboard view — built (static).** Self-contained HTML dashboard with drift
    trend, lock status, and drill-down repair prompts, backed by a run-history
    JSON. ✅
-6. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
+6. **Verdict attestation, built.** `driftguard attest` / `verify` and a
+   GitHub Action bind agent verdicts to SHA-256 hashes and refuse on mismatch. ✅
+7. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
    add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
 
 ## Documentation
 
+- [Verdict attestation](./docs/attestation.md): the schema, the statuses, wiring agents in.
 - [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
   the honesty model, repair prompts).
 - [Authoring guide](./docs/authoring.md) — JSON and TypeScript packs, assertion
@@ -255,8 +346,8 @@ overconfidently when the evidence isn't there.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). Weighing alternatives (Apache-2.0, AGPL, BSL)?
-See [LICENSE-OPTIONS.md](./LICENSE-OPTIONS.md).
+Apache-2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE). The reasoning
+behind the choice is in [LICENSE-OPTIONS.md](./LICENSE-OPTIONS.md).
 
 ---
 

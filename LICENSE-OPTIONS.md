@@ -1,7 +1,7 @@
 # Licensing options for DriftGuard
 
 A reference so you can make an informed, unhurried decision. **Current license:
-MIT.** Changing it later is a one-line swap (plus this doc). Nothing here is legal
+Apache-2.0** (switched from MIT for v0.1.0, for the explicit patent grant). Changing it later is a one-line swap (plus this doc). Nothing here is legal
 advice — for a venture-scale raise, confirm the final choice with a lawyer.
 
 ## The core trade-off
@@ -21,7 +21,7 @@ SaaS** directly from your code.
 
 ---
 
-## Option A — MIT (current)
+## Option A — MIT (previous)
 
 - **What it allows:** use, modify, sell, embed in closed products. Only
   requirement: keep the copyright notice. No warranty.
@@ -32,7 +32,7 @@ SaaS** directly from your code.
   trademark), and launch a closed competing service.
 - **Best if:** adoption is everything and your moat is the cloud + brand.
 
-## Option B — Apache-2.0  *(recommended default)*
+## Option B — Apache-2.0  *(current)*
 
 - **What it allows:** same permissive rights as MIT, **plus an explicit patent
   grant** and a patent-retaliation clause.

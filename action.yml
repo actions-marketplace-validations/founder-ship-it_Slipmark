@@ -1,0 +1,45 @@
+name: "DriftGuard verify"
+description: "Refuse to ship unless every AI agent verdict matches the exact files it read (SHA-256 attestation gate)."
+author: "Reply Intelligence Group"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  dir:
+    description: "Directory of attestation files, relative to the repository root."
+    required: false
+    default: ".driftguard/attestations"
+  require:
+    description: "Files that must be covered by a passing, current attestation. One path per line."
+    required: false
+    default: ""
+  working-directory:
+    description: "Repository root to verify against."
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Build DriftGuard
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --no-audit --no-fund && npm run build
+    - name: Verify attestations
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        DG_DIR: ${{ inputs.dir }}
+        DG_REQUIRE: ${{ inputs.require }}
+      run: |
+        args=(verify --dir "$DG_DIR")
+        while IFS= read -r line; do
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+          [ -n "$line" ] && args+=(--require "$line")
+        done <<< "$DG_REQUIRE"
+        node "${{ github.action_path }}/dist/src/cli.js" "${args[@]}"

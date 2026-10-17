@@ -25,3 +25,18 @@ jobs:
         # In a real project you DO want this to fail CI on drift (drop continue-on-error).
         continue-on-error: true
         run: node dist/src/cli.js dist/packs/demo-shop/pack.js
+      - name: Attestation gate demo (informational)
+        # The example ships one stale verdict on purpose, so the gate refuses.
+        continue-on-error: true
+        run: node dist/src/cli.js verify --dir examples/attestation/attestations
+      - name: The Action itself, against the example (must refuse)
+        id: action_demo
+        continue-on-error: true
+        uses: ./
+        with:
+          dir: examples/attestation/attestations
+      - name: Fail if the Action did not refuse the stale verdict
+        if: steps.action_demo.outcome != 'failure'
+        run: |
+          echo "The attestation gate passed a stale verdict. It must refuse."
+          exit 1
