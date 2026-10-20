@@ -6,6 +6,28 @@
 
 **Make AI agents prove what they checked.**
 
+Add it to a workflow:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: founder-ship-it/Slipmark@v0.2.0
+  with:
+    require: |
+      specs/your-spec.md
+```
+
+When a file changes after an agent signed it off, the build refuses:
+
+```
+Slipmark verify: 1 verified · 1 refused
+
+  ✓ verified             review-agent verified examples/attestation/brief.md
+  ✗ hash_mismatch        security-audit-agent gave "cleared" for a different version of
+                         examples/attestation/spec.md. The file changed after the verdict.
+```
+
+Agents write their sign-off with `slipmark attest` (see [Verdict attestation](#verdict-attestation)). No model calls, no config files, one GitHub Action.
+
 A slip mark is the paint line engineers draw across a bolt once it has been
 tightened and checked. If the bolt ever moves, the line breaks and everyone can
 see it. Slipmark does the same for AI agent verdicts: once an agent signs off a
