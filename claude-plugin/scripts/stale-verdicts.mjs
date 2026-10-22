@@ -10,18 +10,30 @@ import { join as join2 } from "node:path";
 
 // src/attest/attestation.ts
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 var ATTESTATION_SCHEMA = "slipmark/attestation@1";
 var PASSING_VERDICTS = ["pass", "cleared"];
 function sha256File(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
+function escapes(rel) {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
 function resolveSubject(root, subject) {
   if (!subject || isAbsolute(subject)) return null;
-  const abs = resolve(root, subject);
-  const rel = relative(resolve(root), abs);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
+  const base = resolve(root);
+  const abs = resolve(base, subject);
+  const rel = relative(base, abs);
+  if (rel === "" || escapes(rel)) return null;
+  if (existsSync(abs)) {
+    try {
+      const realRel = relative(realpathSync(base), realpathSync(abs));
+      if (realRel === "" || escapes(realRel)) return null;
+    } catch {
+      return null;
+    }
+  }
   return abs;
 }
 function toPosix(p) {

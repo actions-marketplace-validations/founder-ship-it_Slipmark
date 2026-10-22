@@ -4,7 +4,21 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Security
+- Subject paths are now resolved through symlinks and re-checked against the
+  real repository root. A symlink inside the repository that points outside it
+  was previously followed and hashed. Found by a Claude Code review of
+  `attestation.ts` against `docs/attestation.md`.
+
+### Fixed
+- File names that merely start with `..` (for example `..notes.md`) are no
+  longer rejected as escaping the repository.
+
 ### Added
+- Slipmark gates its own code: `.slipmark/attestations/` holds a real review
+  verdict, required by CI and recorded in Slipmark Cloud.
+- `slipmark upload` and the Action's `cloud` input record runs in Slipmark
+  Cloud (app.slipmark.dev) using the GitHub Actions OIDC token.
 - **Claude Code plugin** in `claude-plugin/`, installable from this repo as a
   marketplace (`/plugin marketplace add founder-ship-it/Slipmark`). A skill
   that records verdicts, `/slipmark:verify`, `/slipmark:setup`, and a Stop hook

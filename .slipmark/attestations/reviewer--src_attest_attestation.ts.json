@@ -1,0 +1,17 @@
+{
+  "schema": "slipmark/attestation@1",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-22T15:16:26.205Z",
+  "subjects": [
+    {
+      "path": "src/attest/attestation.ts",
+      "sha256": "53785e122dd77f2a5ce25c54d6f1350b9cc8a590b0cb298bf36fa5629266bbd7"
+    },
+    {
+      "path": "docs/attestation.md",
+      "sha256": "703fbea20adff0af23c27a8742f67db6c449e1e4416ede26ff75df4d19193371"
+    }
+  ],
+  "note": "attestation.ts implements the documented model, statuses, empty-run and --require handling, and path/symlink escape rejection"
+}
