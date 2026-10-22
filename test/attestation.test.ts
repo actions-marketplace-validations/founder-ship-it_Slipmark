@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -132,4 +132,36 @@ test("security: subject paths that escape the repo are never hashed", () => {
   );
   const r = verifyAttestations({ root });
   assert.equal(r.failures[0]!.status, "invalid");
+});
+
+test("security: a symlink inside the repo that points outside it is never hashed", () => {
+  const root = repo();
+  const outside = mkdtempSync(join(tmpdir(), "sm-outside-"));
+  writeFileSync(join(outside, "secret.txt"), "do not read\n");
+  symlinkSync(join(outside, "secret.txt"), join(root, "specs/link.md"));
+  symlinkSync(outside, join(root, "linkdir"));
+  assert.equal(resolveSubject(root, "specs/link.md"), null);
+  assert.equal(resolveSubject(root, "linkdir/secret.txt"), null);
+  assert.throws(() => createAttestation({ root, subjects: ["specs/link.md"], verdict: "pass", by: "a" }));
+  mkdirSync(join(root, DIR), { recursive: true });
+  writeFileSync(
+    join(root, DIR, "evil.json"),
+    JSON.stringify({ schema: ATTESTATION_SCHEMA, by: "x", verdict: "pass", at: "", subjects: [{ path: "specs/link.md", sha256: "a".repeat(64) }] }),
+  );
+  const r = verifyAttestations({ root });
+  assert.equal(r.failures[0]!.status, "invalid");
+});
+
+test("security: a symlink that stays inside the repo still works", () => {
+  const root = repo();
+  symlinkSync(join(root, "specs/feature.md"), join(root, "specs/alias.md"));
+  assert.ok(resolveSubject(root, "specs/alias.md"));
+});
+
+test("paths: in-repo names that merely start with '..' are accepted", () => {
+  const root = repo();
+  writeFileSync(join(root, "..notes.md"), "x\n");
+  assert.ok(resolveSubject(root, "..notes.md"));
+  const att = createAttestation({ root, subjects: ["..notes.md"], verdict: "pass", by: "a" });
+  assert.equal(att.subjects[0]!.path, "..notes.md");
 });

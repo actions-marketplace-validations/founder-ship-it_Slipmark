@@ -10,7 +10,7 @@ Add it to a workflow:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.2.0
+- uses: founder-ship-it/Slipmark@v0.3.0
   with:
     require: |
       specs/your-spec.md
@@ -26,7 +26,7 @@ Slipmark verify: 1 verified · 1 refused
                          examples/attestation/spec.md. The file changed after the verdict.
 ```
 
-Agents write their sign-off with `slipmark attest` (see [Verdict attestation](#verdict-attestation)). No model calls, no config files, one GitHub Action.
+Set it up in one command: `npx slipmark init`. Your coding agents then write their sign-off with `slipmark attest` (see [Works with your coding agent](#works-with-your-coding-agent)). No model calls, no account, one GitHub Action.
 
 A slip mark is the paint line engineers draw across a bolt once it has been
 tightened and checked. If the bolt ever moves, the line breaks and everyone can
@@ -48,7 +48,7 @@ Slipmark does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.2.0`, early. Apache-2.0.
+> Status: `v0.3.0`, early. Apache-2.0.
 
 ## Why the gate exists
 
@@ -65,21 +65,71 @@ all 23.
 
 ## Quick start
 
+In the repository you want to protect (Node 22.6 or later):
+
 ```bash
-npm install
-npm run build
-npm test              # 31 tests, all green
-npm run demo:verify   # the attestation gate refusing a stale verdict
-npm run demo          # drift diagnosis on the demo pack
+npx slipmark init
 ```
 
 ```
-Slipmark verify: 1 verified · 1 refused
-
-  ✓ verified             review-agent verified examples/attestation/brief.md
-  ✗ hash_mismatch        security-audit-agent gave "cleared" for a different version of
-                         examples/attestation/spec.md. The file changed after the verdict.
+  + create .slipmark/attestations/.gitkeep      attestation directory, committed with the repo
+  + create .github/workflows/slipmark.yml       report-only gate on pull requests
+  + create AGENTS.md                            agent instructions for attesting verdicts
+  ~ update CLAUDE.md                            agent instructions for attesting verdicts
 ```
+
+That is the whole setup:
+
+- **A workflow** that runs the gate on every pull request. It starts in
+  report-only mode, because a repo with no verdicts yet would otherwise fail.
+  Set `fail-on-refusal: "true"` once your agents are attesting.
+- **Agent instructions** in `AGENTS.md`, plus `CLAUDE.md`, Cursor rules or
+  Copilot instructions if your repo already has them. Re-running `init` updates
+  the block in place and never touches anything else in those files.
+
+Check any time with `npx slipmark verify`. Commit `.slipmark/attestations/`.
+
+## Works with your coding agent
+
+The instructions `init` writes are enough for agents to attest on their own. We
+gave Claude Code a plain review task in a fresh repo, with no mention of
+Slipmark:
+
+> Review src/export.ts against specs/invoice-export.md. Does it meet the spec?
+
+It read both files, found the export was not CSV, and recorded:
+
+```json
+{
+  "by": "reviewer",
+  "verdict": "fail",
+  "subjects": [
+    { "path": "src/export.ts", "sha256": "0ea6029f…" },
+    { "path": "specs/invoice-export.md", "sha256": "81994e0f…" }
+  ],
+  "note": "Tenant filter and 10k limit OK; no CSV output, returns raw query result"
+}
+```
+
+Both files it based the verdict on, not just the one under review. When the
+code is fixed, the old verdict stops counting until the agent reads it again.
+
+Setup notes for Claude Code, Cursor, Copilot and Codex are in
+[docs/agents.md](./docs/agents.md).
+
+### Claude Code plugin
+
+For Claude Code there is also a plugin. It adds a skill so Claude records
+verdicts without any repo instructions, `/slipmark:verify` and
+`/slipmark:setup` commands, and a stop check that asks Claude to re-read and
+re-attest when a file it signed off has changed since.
+
+```text
+/plugin marketplace add founder-ship-it/Slipmark
+/plugin install slipmark@slipmark
+```
+
+Details, including exactly what it runs, in [claude-plugin/](./claude-plugin/README.md).
 
 ## Verdict attestation
 
@@ -127,7 +177,7 @@ silent pass. `--json` prints the full report for other tools.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.2.0
+- uses: founder-ship-it/Slipmark@v0.3.0
   with:
     require: |
       specs/invoice-export.md
@@ -278,6 +328,7 @@ the whole point of the standalone extraction.
 ## CLI
 
 ```bash
+slipmark init [--dry-run] [--no-workflow] [--no-agents] [--force]
 slipmark <pack.js> [--git <git-context.json>] [--prompts] [--emit <dir>]
 slipmark attest --by <agent> --verdict <pass|cleared|fail> --subject <file>... [--note "..."] [--out <file>]
 slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
@@ -367,9 +418,19 @@ overconfidently when the evidence isn't there.
 7. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
    add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
 
+## Developing Slipmark
+
+```bash
+npm install
+npm test              # 40 tests
+npm run demo:verify   # the attestation gate refusing a stale verdict
+npm run demo          # drift diagnosis on the demo pack
+```
+
 ## Documentation
 
 - [Verdict attestation](./docs/attestation.md): the schema, the statuses, wiring agents in.
+- [Coding agents](./docs/agents.md): Claude Code, Cursor, Copilot and Codex setup.
 - [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
   the honesty model, repair prompts).
 - [Authoring guide](./docs/authoring.md) — JSON and TypeScript packs, assertion

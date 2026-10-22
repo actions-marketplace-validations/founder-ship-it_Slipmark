@@ -2,6 +2,49 @@
 
 All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
+## [Unreleased]
+
+### Security
+- Subject paths are now resolved through symlinks and re-checked against the
+  real repository root. A symlink inside the repository that points outside it
+  was previously followed and hashed. Found by a Claude Code review of
+  `attestation.ts` against `docs/attestation.md`.
+
+### Fixed
+- File names that merely start with `..` (for example `..notes.md`) are no
+  longer rejected as escaping the repository.
+
+### Added
+- Slipmark gates its own code: `.slipmark/attestations/` holds a real review
+  verdict, required by CI and recorded in Slipmark Cloud.
+- `slipmark upload` and the Action's `cloud` input record runs in Slipmark
+  Cloud (app.slipmark.dev) using the GitHub Actions OIDC token.
+- **Claude Code plugin** in `claude-plugin/`, installable from this repo as a
+  marketplace (`/plugin marketplace add founder-ship-it/Slipmark`). A skill
+  that records verdicts, `/slipmark:verify`, `/slipmark:setup`, and a Stop hook
+  that asks Claude to re-attest when an attested file has changed. Commands are
+  pinned to `slipmark@0.3.0`.
+
+## [0.3.0] - 2026-10-22
+
+### Added
+- **`npx slipmark init`** sets up a repository in one command: the
+  attestation directory, a GitHub workflow and instructions for coding agents.
+  The workflow starts in report-only mode, because a repository with no
+  verdicts yet would otherwise fail its first run.
+- **Agent instructions** in `AGENTS.md`, and in `CLAUDE.md`, Cursor rules or
+  Copilot instructions when the repository already uses them. The block is
+  fenced with markers, so re-running `init` updates it in place.
+- `slipmark --help` and `slipmark --version`.
+- [docs/agents.md](./docs/agents.md): setup for Claude Code, Cursor, Copilot
+  and Codex, and how to check agents are attesting.
+- Published to npm as `slipmark`.
+
+### Changed
+- `verify` with no attestations at all now explains how to record the first
+  one instead of telling you to re-run the agent.
+- `attest` prints the path it wrote relative to the current directory.
+
 ## [0.2.0] - 2026-10-17
 
 ### Changed (breaking)

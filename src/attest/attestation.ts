@@ -14,7 +14,7 @@
  * Everything here is pure Node: `node:crypto`, `node:fs`, `node:path`.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const ATTESTATION_SCHEMA = "slipmark/attestation@1";
@@ -74,15 +74,31 @@ export function sha256File(filePath: string): string {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
+/** True when `rel` (a path relative to some root) points outside that root. */
+function escapes(rel: string): boolean {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
 /**
  * Resolve a subject path against the root and refuse anything that escapes it.
- * Attestations are untrusted input: "../../etc/passwd" must never be hashed.
+ * Attestations are untrusted input: "../../etc/passwd" must never be hashed,
+ * and neither may a symlink inside the repo that points outside it.
  */
 export function resolveSubject(root: string, subject: string): string | null {
   if (!subject || isAbsolute(subject)) return null;
-  const abs = resolve(root, subject);
-  const rel = relative(resolve(root), abs);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
+  const base = resolve(root);
+  const abs = resolve(base, subject);
+  const rel = relative(base, abs);
+  if (rel === "" || escapes(rel)) return null;
+  // Follow symlinks (in the file or any parent folder) and check again against the real root.
+  if (existsSync(abs)) {
+    try {
+      const realRel = relative(realpathSync(base), realpathSync(abs));
+      if (realRel === "" || escapes(realRel)) return null;
+    } catch {
+      return null;
+    }
+  }
   return abs;
 }
 

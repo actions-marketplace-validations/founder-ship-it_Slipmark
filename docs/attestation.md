@@ -97,8 +97,9 @@ merge and a verdict produced anywhere else won't match.
 
 ## Security notes
 
-- Attestation files are untrusted input. Subject paths that are absolute or
-  escape the repository root are rejected and never read.
+- Attestation files are untrusted input. Subject paths that are absolute,
+  escape the repository root, or resolve outside it through a symlink are
+  rejected and never read.
 - The gate proves a verdict is about the current bytes. It doesn't prove the
   verdict is right, or that the attestation was written by the agent named in
   `by`. Protect who can write to the attestation directory as you would any CI

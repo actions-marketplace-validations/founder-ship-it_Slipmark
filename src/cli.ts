@@ -2,6 +2,7 @@
 /**
  * Minimal Slipmark CLI.
  *
+ *   slipmark init [--dry-run] [--no-workflow] [--no-agents] [--force]
  *   slipmark <pack.ts|pack.js> [--git <git-context.json>] [--prompts]
  *   slipmark attest --by <agent> --verdict <pass|fail> --subject <file> [--subject <file>...] [--note "..."] [--out <file>]
  *   slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
@@ -13,13 +14,103 @@
  */
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeCommandFor, runGitBisect, loadDeclarativePack, summariseRun, appendRun, renderDashboardHtml } from "./index.js";
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 import type { DashboardData } from "./dashboard/data.js";
 import { createAttestation, writeAttestation, defaultAttestationPath, verifyAttestations } from "./attest/attestation.js";
 import { existsSync } from "node:fs";
+import { planInit, applyInit } from "./init.js";
+import { uploadRun, summaryMarkdown } from "./cloud/upload.js";
+import { appendFileSync } from "node:fs";
+
+/** Version from the package this CLI ships in (dist/src/cli.js → ../../package.json). */
+function version(): string {
+  try {
+    return (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+}
+
+const HELP = `Slipmark: make AI agents prove what they checked.
+
+Usage
+  slipmark init                 Wire Slipmark into this repo (workflow + agent instructions)
+  slipmark attest ...           Record a verdict bound to the SHA-256 of the files it covers
+  slipmark verify               Refuse if any verdict is about different files from these
+  slipmark upload               Record this CI run in Slipmark Cloud (GitHub Actions, id-token: write)
+  slipmark <pack>               Run drift diagnosis locks
+  slipmark bisect ...           Find the commit where a probe started failing
+  slipmark dashboard ...        Render a drift history dashboard
+
+attest
+  --by <agent> --verdict <pass|cleared|fail|blocked> --subject <file> [--subject <file>...]
+  [--note "..."] [--dir .slipmark/attestations] [--out <file>]
+
+verify
+  [--dir .slipmark/attestations] [--require <file>...] [--json]
+  Exit 0: every verdict matches the files as they are now. Exit 1: refused.
+
+upload
+  [--dir .slipmark/attestations] [--require <file>...] [--url <ingest url>] [--strict]
+  Never changes the gate result unless --strict is passed.
+
+init
+  [--dry-run] [--no-workflow] [--no-agents] [--force]
+
+Docs: https://github.com/founder-ship-it/Slipmark
+`;
+
+/** `slipmark upload [--dir d] [--require f...] [--url u] [--strict]` */
+async function uploadMain(args: string[]): Promise<void> {
+  const dir = argVal(args, "--dir") ?? ".slipmark/attestations";
+  const report = verifyAttestations({ dir, require: argVals(args, "--require") });
+  const result = await uploadRun({
+    dir,
+    require: argVals(args, "--require"),
+    url: argVal(args, "--url") ?? undefined,
+    clientVersion: version(),
+    report,
+  });
+  console.log(`\nSlipmark Cloud: ${result.message}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try { appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(report, result)); } catch { /* summary is best-effort */ }
+  }
+  if (process.env.GITHUB_OUTPUT && result.url) {
+    try { appendFileSync(process.env.GITHUB_OUTPUT, `proof-url=${result.url}\n`); } catch { /* best-effort */ }
+  }
+  if (!result.ok && process.env.GITHUB_ACTIONS) console.log(`::warning title=Slipmark Cloud::${result.message}`);
+  process.exit(!result.ok && args.includes("--strict") ? 1 : 0);
+}
+
+/** `slipmark init [--dry-run] [--no-workflow] [--no-agents] [--force]` */
+function initMain(args: string[]): void {
+  const root = process.cwd();
+  const plan = planInit({
+    root,
+    actionRef: `v${version()}`,
+    workflow: !args.includes("--no-workflow"),
+    agents: !args.includes("--no-agents"),
+    force: args.includes("--force"),
+  });
+  const dry = args.includes("--dry-run");
+  console.log(`\nSlipmark init${dry ? " (dry run, nothing written)" : ""}\n`);
+  for (const f of plan) {
+    const mark = f.action === "skip" ? "·" : f.action === "create" ? "+" : "~";
+    console.log(`  ${mark} ${f.action.padEnd(6)} ${f.path.padEnd(36)} ${f.reason}`);
+  }
+  if (dry) return;
+  applyInit(root, plan);
+  console.log(`
+  Next
+    1. Commit these files, including .slipmark/attestations/.
+    2. Your agents now attest verdicts with: npx slipmark attest --by <role> --verdict pass --subject <file>
+    3. Check any time with: npx slipmark verify
+    4. The workflow starts in report-only mode. Set fail-on-refusal to "true" to enforce.
+`);
+}
 
 function fail(msg: string): never {
   console.error(`slipmark: ${msg}`);
@@ -131,7 +222,7 @@ function attestMain(args: string[]): void {
   writeAttestation(out, att);
   console.log(`\n  ${att.by} → "${att.verdict}" on ${att.subjects.length} file(s)`);
   for (const s of att.subjects) console.log(`    ${s.sha256.slice(0, 12)}  ${s.path}`);
-  console.log(`  written → ${out}\n`);
+  console.log(`  written → ${relative(process.cwd(), out)}\n`);
 }
 
 /** `slipmark verify [--dir d] [--require <file>...] [--json]` */
@@ -154,13 +245,36 @@ function verifyMain(args: string[]): void {
       console.log(`      now:      ${r.actual}`);
     }
   }
-  console.log(report.ok ? "\n  Every verdict matches the files as they are now.\n" : "\n  Gate refused. Re-run the agent on the current files, or fix the input.\n");
+  if (report.ok) console.log("\n  Every verdict matches the files as they are now.\n");
+  else if (report.checked === 0)
+    console.log(
+      "\n  Gate refused: no verdicts recorded yet, so there is nothing to prove.\n" +
+        "  Agents record one with: npx slipmark attest --by <role> --verdict pass --subject <file>\n" +
+        "  New here? Run: npx slipmark init\n",
+    );
+  else console.log("\n  Gate refused. Re-run the agent on the current files, or fix the input.\n");
   process.exit(report.ok ? 0 : 1);
 }
 
 async function main() {
   const args = process.argv.slice(2);
 
+  if (args.length === 0 || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
+    console.log(HELP);
+    return;
+  }
+  if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
+    console.log(version());
+    return;
+  }
+  if (args[0] === "upload") {
+    await uploadMain(args.slice(1));
+    return;
+  }
+  if (args[0] === "init") {
+    initMain(args.slice(1));
+    return;
+  }
   if (args[0] === "bisect") {
     await bisectMain(args.slice(1));
     return;

@@ -22,11 +22,22 @@ inputs:
     description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll Slipmark out."
     required: false
     default: "true"
+  cloud:
+    description: "Record this run in Slipmark Cloud's append-only ledger and link a proof page from the job summary. Needs 'permissions: id-token: write' on the job. Never changes the gate result."
+    required: false
+    default: "false"
+  cloud-url:
+    description: "Override the Slipmark Cloud ingest URL."
+    required: false
+    default: ""
 
 outputs:
   result:
     description: "'passed' or 'refused'."
     value: ${{ steps.verify.outputs.result }}
+  proof-url:
+    description: "Link to this run's Slipmark Cloud proof page (public repositories, when cloud is 'true')."
+    value: ${{ steps.verify.outputs.proof-url }}
 
 runs:
   using: "composite"
@@ -46,6 +57,8 @@ runs:
         DG_DIR: ${{ inputs.dir }}
         DG_REQUIRE: ${{ inputs.require }}
         DG_FAIL: ${{ inputs.fail-on-refusal }}
+        DG_CLOUD: ${{ inputs.cloud }}
+        DG_CLOUD_URL: ${{ inputs.cloud-url }}
         DG_CLI: ${{ github.action_path }}/dist/src/cli.js
       run: |
         args=(verify --dir "$DG_DIR")
@@ -57,6 +70,11 @@ runs:
         set +e
         node "$DG_CLI" "${args[@]}"
         code=$?
+        if [ "$DG_CLOUD" = "true" ]; then
+          up=(upload --dir "$DG_DIR")
+          [ -n "$DG_CLOUD_URL" ] && up+=(--url "$DG_CLOUD_URL")
+          node "$DG_CLI" "${up[@]}"
+        fi
         set -e
         if [ "$code" -eq 0 ]; then
           echo "result=passed" >> "$GITHUB_OUTPUT"

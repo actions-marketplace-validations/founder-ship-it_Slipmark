@@ -3,7 +3,9 @@ dist/
 *.log
 # generated outputs (the committed dashboard/sample.html is intentional)
 /dashboard.html
-.slipmark/
+# .slipmark/attestations/ is committed: Slipmark attests its own files.
+.slipmark/*
+!.slipmark/attestations/
 .DS_Store
 .env
 .env.*
