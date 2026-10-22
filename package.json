@@ -1,6 +1,6 @@
 {
   "name": "slipmark",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
   "homepage": "https://www.replyintelligencegroup.co.uk/products/slipmark",
   "repository": {
@@ -31,7 +31,8 @@
     "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
     "demo": "tsc -p tsconfig.json && node dist/src/cli.js dist/packs/demo-shop/pack.js --git packs/demo-shop/git-context.example.json --prompts",
     "dashboard:sample": "tsc -p tsconfig.json && node dist/src/cli.js dashboard --from dashboard/sample-history.json --out dashboard/sample.html",
-    "demo:verify": "tsc -p tsconfig.json && node dist/src/cli.js verify --dir examples/attestation/attestations"
+    "demo:verify": "tsc -p tsconfig.json && node dist/src/cli.js verify --dir examples/attestation/attestations",
+    "prepublishOnly": "npm test"
   },
   "engines": {
     "node": ">=22.6.0"
@@ -49,10 +50,19 @@
     "regression",
     "reliability",
     "supply-chain",
-    "verification"
+    "verification",
+    "claude-code",
+    "cursor",
+    "copilot",
+    "agents-md",
+    "proof-of-read",
+    "sha256"
   ],
   "devDependencies": {
     "@types/node": "^22.19.21",
     "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

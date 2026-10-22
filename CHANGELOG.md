@@ -2,6 +2,26 @@
 
 All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
+## [0.3.0] - 2026-10-22
+
+### Added
+- **`npx slipmark init`** sets up a repository in one command: the
+  attestation directory, a GitHub workflow and instructions for coding agents.
+  The workflow starts in report-only mode, because a repository with no
+  verdicts yet would otherwise fail its first run.
+- **Agent instructions** in `AGENTS.md`, and in `CLAUDE.md`, Cursor rules or
+  Copilot instructions when the repository already uses them. The block is
+  fenced with markers, so re-running `init` updates it in place.
+- `slipmark --help` and `slipmark --version`.
+- [docs/agents.md](./docs/agents.md): setup for Claude Code, Cursor, Copilot
+  and Codex, and how to check agents are attesting.
+- Published to npm as `slipmark`.
+
+### Changed
+- `verify` with no attestations at all now explains how to record the first
+  one instead of telling you to re-run the agent.
+- `attest` prints the path it wrote relative to the current directory.
+
 ## [0.2.0] - 2026-10-17
 
 ### Changed (breaking)
