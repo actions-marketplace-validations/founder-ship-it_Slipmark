@@ -37,8 +37,8 @@ npx slipmark@0.3.0 verify
 ```
 
 Exit 0 means every verdict matches the files as they are now. A `fail` verdict
-shows as refused, which is correct: it tells the reviewer the work does not
-pass yet.
+shows as refused, which is correct: it tells the reviewer the work is not
+finished.
 
 ## After
 
