@@ -2,7 +2,6 @@
 name: verify
 description: Check every Slipmark verdict in this repository against the files as they are now, and explain any refusal.
 disable-model-invocation: true
-allowed-tools: Bash(npx --yes slipmark@0.3.0 verify:*)
 ---
 
 Run the Slipmark gate on the current working tree:

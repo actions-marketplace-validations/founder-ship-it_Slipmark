@@ -2,7 +2,6 @@
 name: setup
 description: Set up Slipmark in this repository (attestation directory, report-only GitHub workflow, agent instructions).
 disable-model-invocation: true
-allowed-tools: Bash(npx --yes slipmark@0.3.0 init:*)
 ---
 
 Show the plan first, without writing anything:

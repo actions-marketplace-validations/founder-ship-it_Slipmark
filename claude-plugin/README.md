@@ -25,16 +25,23 @@ New to Slipmark in this repository? Run `/slipmark:setup`.
 | `attest-verdicts` skill | Claude loads it when it gives a verdict, and records one with `npx slipmark@0.3.0 attest`. |
 | `/slipmark:verify` | Runs `npx slipmark@0.3.0 verify` and explains any refusal. |
 | `/slipmark:setup` | Shows, then runs, `npx slipmark@0.3.0 init` to add the workflow and agent instructions. |
-| Stop hook | After each response, if `.slipmark/attestations/` exists, re-checks the verdicts. If a file changed after it was attested, Claude is asked once to re-read it and attest again. |
+| Stop hook | After each response, if `.slipmark/attestations/` exists, re-checks the verdicts locally (no network). If a file changed after it was attested, Claude is asked once to re-read it and attest again. |
 
 ## What it runs, sends and stores
 
-- Every command is the pinned npm package `slipmark@0.3.0`, fetched by `npx`
-  from the npm registry the first time. Nothing else is downloaded.
-- The Stop hook does nothing in repositories without `.slipmark/attestations/`.
-  It never blocks on an honest `fail` verdict and never blocks twice in a row.
+- The Stop hook runs `scripts/stale-verdicts.mjs` with Node. It is a single
+  self-contained file with no dependencies: it reads the JSON files in
+  `.slipmark/attestations/`, hashes the files they name and compares. No
+  network, no downloads, no credentials. It is built from `src/plugin/` in this
+  repository (`npm run build:plugin`).
+- The hook does nothing in repositories without `.slipmark/attestations/`. It
+  never blocks on an honest `fail` verdict and never blocks twice in a row.
+- The skills tell Claude to run the pinned npm package `slipmark@0.3.0` through
+  `npx` for `attest`, `verify` and `init`. Claude Code asks you before running
+  each command unless you have allowed it. `npx` fetches the package from the
+  npm registry the first time.
 - Attestations are JSON files written to `.slipmark/attestations/` in your
-  repository. Nothing is sent anywhere. No account, no network calls beyond npm.
+  repository. Nothing is sent anywhere. No account.
 
 ## Licence
 
