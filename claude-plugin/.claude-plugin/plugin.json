@@ -1,10 +1,24 @@
 {
   "name": "slipmark",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Make Claude prove what it checked. Records every verdict with the SHA-256 of the files it was based on, and stops to re-check when an attested file changes.",
-  "author": { "name": "Reply Intelligence Group", "url": "https://www.replyintelligencegroup.co.uk/products/slipmark" },
+  "author": {
+    "name": "Reply Intelligence Group",
+    "url": "https://www.replyintelligencegroup.co.uk/products/slipmark"
+  },
   "homepage": "https://github.com/founder-ship-it/Slipmark",
   "repository": "https://github.com/founder-ship-it/Slipmark",
   "license": "Apache-2.0",
-  "keywords": ["attestation", "verification", "code-review", "ci", "sha256", "ai-agents"]
+  "keywords": [
+    "attestation",
+    "verification",
+    "code-review",
+    "ci",
+    "sha256",
+    "ai-agents"
+  ],
+  "documentationUrl": "https://github.com/founder-ship-it/Slipmark/blob/main/claude-plugin/README.md",
+  "supportUrl": "https://github.com/founder-ship-it/Slipmark/issues",
+  "privacyPolicyUrl": "https://www.replyintelligencegroup.co.uk/legal#privacy",
+  "termsOfServiceUrl": "https://www.replyintelligencegroup.co.uk/legal#terms"
 }
