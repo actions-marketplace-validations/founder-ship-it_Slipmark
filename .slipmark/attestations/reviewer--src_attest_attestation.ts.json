@@ -2,7 +2,7 @@
   "schema": "slipmark/attestation@1",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-22T15:16:26.205Z",
+  "at": "2026-10-22T18:01:06.443Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
@@ -10,8 +10,8 @@
     },
     {
       "path": "docs/attestation.md",
-      "sha256": "703fbea20adff0af23c27a8742f67db6c449e1e4416ede26ff75df4d19193371"
+      "sha256": "8839c1ec7f1cdeec68777d8b4b08aec8f2e80ca7027ca6fe3ad3ed0265ab7ba0"
     }
   ],
-  "note": "attestation.ts implements the documented model, statuses, empty-run and --require handling, and path/symlink escape rejection"
+  "note": "attestation.ts implements the documented model, statuses, empty-run and --require handling, and path/symlink escape rejection; security notes now state symlink escapes are rejected"
 }
