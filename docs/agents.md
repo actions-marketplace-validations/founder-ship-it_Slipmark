@@ -28,7 +28,7 @@ touched.
 | OpenAI Codex | `AGENTS.md` | Always written. |
 | Cursor | `AGENTS.md`, plus `.cursor/rules/slipmark.mdc` if `.cursor/` exists | The rule is `alwaysApply: true`. |
 | GitHub Copilot coding agent | `AGENTS.md`, plus `.github/copilot-instructions.md` if it exists | |
-| Claude Code | `CLAUDE.md` if it exists | If the repo has `.claude/` but no `CLAUDE.md`, `init` creates one containing `@AGENTS.md`. Otherwise create that file yourself. |
+| Claude Code | `CLAUDE.md` if it exists | If the repo has `.claude/` but no `CLAUDE.md`, `init` creates one containing `@AGENTS.md`. Otherwise create that file yourself. Or install the [Slipmark plugin](../claude-plugin/README.md), which needs no repo instructions. |
 | Anything else | `AGENTS.md` | Or paste the block into the agent's system prompt. |
 
 ## Let the agent run the command

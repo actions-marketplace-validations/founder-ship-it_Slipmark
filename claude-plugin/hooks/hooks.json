@@ -1,0 +1,16 @@
+{
+  "description": "Slipmark: after each response, ask Claude to re-check any verdict whose files changed since it was attested.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stale-verdicts.mjs\"",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}

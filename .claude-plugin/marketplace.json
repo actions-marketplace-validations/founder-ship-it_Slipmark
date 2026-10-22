@@ -1,0 +1,14 @@
+{
+  "name": "slipmark",
+  "owner": { "name": "Reply Intelligence Group", "url": "https://www.replyintelligencegroup.co.uk/products/slipmark" },
+  "description": "Slipmark for Claude Code: make agents prove what they checked.",
+  "plugins": [
+    {
+      "name": "slipmark",
+      "source": "./claude-plugin",
+      "description": "Records every verdict with the SHA-256 of the files it was based on, and stops to re-check when an attested file changes.",
+      "category": "security",
+      "tags": ["attestation", "verification", "code-review"]
+    }
+  ]
+}

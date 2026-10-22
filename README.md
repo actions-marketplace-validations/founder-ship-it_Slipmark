@@ -117,6 +117,20 @@ code is fixed, the old verdict stops counting until the agent reads it again.
 Setup notes for Claude Code, Cursor, Copilot and Codex are in
 [docs/agents.md](./docs/agents.md).
 
+### Claude Code plugin
+
+For Claude Code there is also a plugin. It adds a skill so Claude records
+verdicts without any repo instructions, `/slipmark:verify` and
+`/slipmark:setup` commands, and a stop check that asks Claude to re-read and
+re-attest when a file it signed off has changed since.
+
+```text
+/plugin marketplace add founder-ship-it/Slipmark
+/plugin install slipmark@slipmark
+```
+
+Details, including exactly what it runs, in [claude-plugin/](./claude-plugin/README.md).
+
 ## Verdict attestation
 
 **1. The agent attests what it read.** Call this at the end of any agent step

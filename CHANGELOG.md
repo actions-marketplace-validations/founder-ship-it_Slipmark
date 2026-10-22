@@ -2,6 +2,15 @@
 
 All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
+## [Unreleased]
+
+### Added
+- **Claude Code plugin** in `claude-plugin/`, installable from this repo as a
+  marketplace (`/plugin marketplace add founder-ship-it/Slipmark`). A skill
+  that records verdicts, `/slipmark:verify`, `/slipmark:setup`, and a Stop hook
+  that asks Claude to re-attest when an attested file has changed. Commands are
+  pinned to `slipmark@0.3.0`.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added
