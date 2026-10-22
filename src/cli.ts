@@ -22,6 +22,8 @@ import type { DashboardData } from "./dashboard/data.js";
 import { createAttestation, writeAttestation, defaultAttestationPath, verifyAttestations } from "./attest/attestation.js";
 import { existsSync } from "node:fs";
 import { planInit, applyInit } from "./init.js";
+import { uploadRun, summaryMarkdown } from "./cloud/upload.js";
+import { appendFileSync } from "node:fs";
 
 /** Version from the package this CLI ships in (dist/src/cli.js → ../../package.json). */
 function version(): string {
@@ -38,6 +40,7 @@ Usage
   slipmark init                 Wire Slipmark into this repo (workflow + agent instructions)
   slipmark attest ...           Record a verdict bound to the SHA-256 of the files it covers
   slipmark verify               Refuse if any verdict is about different files from these
+  slipmark upload               Record this CI run in Slipmark Cloud (GitHub Actions, id-token: write)
   slipmark <pack>               Run drift diagnosis locks
   slipmark bisect ...           Find the commit where a probe started failing
   slipmark dashboard ...        Render a drift history dashboard
@@ -50,11 +53,37 @@ verify
   [--dir .slipmark/attestations] [--require <file>...] [--json]
   Exit 0: every verdict matches the files as they are now. Exit 1: refused.
 
+upload
+  [--dir .slipmark/attestations] [--require <file>...] [--url <ingest url>] [--strict]
+  Never changes the gate result unless --strict is passed.
+
 init
   [--dry-run] [--no-workflow] [--no-agents] [--force]
 
 Docs: https://github.com/founder-ship-it/Slipmark
 `;
+
+/** `slipmark upload [--dir d] [--require f...] [--url u] [--strict]` */
+async function uploadMain(args: string[]): Promise<void> {
+  const dir = argVal(args, "--dir") ?? ".slipmark/attestations";
+  const report = verifyAttestations({ dir, require: argVals(args, "--require") });
+  const result = await uploadRun({
+    dir,
+    require: argVals(args, "--require"),
+    url: argVal(args, "--url") ?? undefined,
+    clientVersion: version(),
+    report,
+  });
+  console.log(`\nSlipmark Cloud: ${result.message}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try { appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(report, result)); } catch { /* summary is best-effort */ }
+  }
+  if (process.env.GITHUB_OUTPUT && result.url) {
+    try { appendFileSync(process.env.GITHUB_OUTPUT, `proof-url=${result.url}\n`); } catch { /* best-effort */ }
+  }
+  if (!result.ok && process.env.GITHUB_ACTIONS) console.log(`::warning title=Slipmark Cloud::${result.message}`);
+  process.exit(!result.ok && args.includes("--strict") ? 1 : 0);
+}
 
 /** `slipmark init [--dry-run] [--no-workflow] [--no-agents] [--force]` */
 function initMain(args: string[]): void {
@@ -236,6 +265,10 @@ async function main() {
   }
   if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
     console.log(version());
+    return;
+  }
+  if (args[0] === "upload") {
+    await uploadMain(args.slice(1));
     return;
   }
   if (args[0] === "init") {

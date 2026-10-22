@@ -49,6 +49,8 @@ export {
 } from "./attest/attestation.js";
 export type { Attestation, AttestedSubject, Verdict, CheckResult, CheckStatus, VerifyReport } from "./attest/attestation.js";
 export { planInit, applyInit, agentBlock, workflowYaml } from "./init.js";
+export { uploadRun, getOidcToken, collectAttestations, summaryMarkdown, DEFAULT_CLOUD_URL } from "./cloud/upload.js";
+export type { UploadResult } from "./cloud/upload.js";
 export type { InitOptions, PlannedFile } from "./init.js";
 
 export {

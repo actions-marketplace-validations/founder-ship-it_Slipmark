@@ -7,6 +7,9 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # lets the Action record this run in Slipmark Cloud
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,11 +51,20 @@ jobs:
         with:
           dir: examples/attestation/attestations
           fail-on-refusal: "false"
+          cloud: "true"
+          cloud-url: https://wpecmuqarsgfctqaoqyk.supabase.co/functions/v1/ingest
 
       - name: "Check: the Action reported a refusal"
         env:
-
           RESULT: ${{ steps.action_demo.outputs.result }}
         run: |
           if [ "$RESULT" != "refused" ]; then echo "::error::The Action let a stale verdict through (result=$RESULT)"; exit 1; fi
           echo "::notice title=Demo::Action refused the stale verdict, as expected"
+
+      - name: "Check: the run was recorded in Slipmark Cloud"
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PROOF: ${{ steps.action_demo.outputs.proof-url }}
+        run: |
+          if [ -z "$PROOF" ]; then echo "::error::No Slipmark Cloud proof link was returned"; exit 1; fi
+          echo "::notice title=Slipmark Cloud::$PROOF"
