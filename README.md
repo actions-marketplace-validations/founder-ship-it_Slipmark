@@ -255,10 +255,15 @@ is the optional hosted layer for teams that need the record, not just the build 
 - **Rules as a required check.** For example, "changes under `src/auth/**` need a passing verdict from
   `security-reviewer`", posted to the pull request as **Slipmark policy**. Admins can approve a failing
   check, but only with a written reason that goes on the record.
-- **Alerts** to Slack, Microsoft Teams, Discord, Google Chat and PagerDuty, or signed webhooks
-  ([Standard Webhooks](https://www.standardwebhooks.com)) to anything else. PagerDuty incidents close
-  themselves when the pull request passes.
-- **Insights and audit evidence packs** for SOC 2 CC8.1 and ISO 27001 change-management controls.
+- **Alerts that say what to do.** Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, email, or signed
+  webhooks ([Standard Webhooks](https://www.standardwebhooks.com)) to anything else. Each failure names the rule,
+  the files, the agent that needs to sign off and the command to fix it. Route by repository and rule, and ping
+  the right people. PagerDuty incidents close themselves when the pull request passes.
+- **The Slipmark Slack app.** One thread per pull request, and admins can approve a failing check from Slack with
+  a written reason that goes on the record.
+- **Weekly summary** of runs, blocked pull requests, stale verdicts caught and every override.
+- **Insights and audit evidence packs** for SOC 2 CC8.1 and ISO 27001 change-management controls: a PDF for the
+  auditor with the JSON attached inside it.
 
 Turn it on by installing the [Slipmark GitHub App](https://github.com/apps/slipmark/installations/new) and
 adding two lines to the workflow:
@@ -451,12 +456,12 @@ slipmark bisect --range "main~30..main" \
 A bisected culprit is the strongest causal evidence Slipmark has: it lifts the
 confidence cap and the precise commit range flows into the repair prompt.
 
-## Dashboard (preview of the hosted cloud)
+## Local dashboard
 
-Slipmark renders a self-contained HTML dashboard — drift trend over runs, lock
-status, confidence bars, and drill-down repair prompts. Today it is backed by a
-local run-history JSON file; the hosted cloud will serve the same view from a
-database + API.
+Slipmark renders a self-contained HTML dashboard: drift trend over runs, lock
+status, confidence bars, and drill-down repair prompts, from a local run-history
+JSON file. For a shared, hosted view across repositories, see
+[Slipmark Cloud](#slipmark-cloud).
 
 ```bash
 # Run a pack and append the result to a rolling history, then render the dashboard:
@@ -466,8 +471,7 @@ slipmark dashboard ./drift.pack.json --history .slipmark/history.json --out dash
 slipmark dashboard --from dashboard/sample-history.json --out dashboard/sample.html
 ```
 
-The `--history` file accumulates runs over time — that flat file is exactly the
-data model the cloud backend will persist. See `dashboard/sample.html` for a
+The `--history` file accumulates runs over time. See `dashboard/sample.html` for a
 rendered example.
 
 ## Coding-agent integration
