@@ -187,6 +187,10 @@ Rolling it out gently? Set `fail-on-refusal: "false"` to report refusals as
 warnings without failing the build. The step's `result` output is `passed` or
 `refused` either way.
 
+**Formatters.** A formatter run changes the bytes, so it breaks a verdict like any other change. Run
+formatters before your agent attests (first in your pre-commit hooks) and most of this goes away.
+Formatting-tolerant hash modes and re-reviewing only the diff are planned for v0.5.
+
 Run it on the branch you are about to merge. Because it checks content, not
 branch names, a verdict produced on one branch can't clear a different tree.
 
@@ -227,8 +231,9 @@ jobs:
           cloud: "true"
 ```
 
-`cloud` never changes the gate result. Public repositories are free. Private repositories are £15 a seat a
-month on Team (minimum 3 seats), with a 14-day free trial. See the
+`cloud` never changes the gate result. The gate itself is free for every repository, public or private.
+Cloud is free for public repositories. Private repositories are £15 a seat a month on Team (minimum 3
+seats), with a 14-day free trial. See the
 [quick start](https://app.slipmark.dev/docs/quick-start) and
 [pricing](https://app.slipmark.dev/#pricing).
 
