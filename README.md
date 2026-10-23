@@ -63,6 +63,33 @@ So we built the gate: bind every verdict to the hash of what it read, and
 re-check before shipping. Pointed at 23 open agent pull requests, it refused
 all 23.
 
+## What Slipmark proves, and what it doesn't
+
+Slipmark doesn't decide whether your agent is right. It makes sure the verdict
+you are trusting is about the code you are shipping.
+
+**It proves:**
+
+- The verdict was given on these exact bytes. Change one and the verdict stops
+  counting.
+- Every file you require has a current, passing verdict. A missing verdict is
+  a refusal, not a silent pass.
+- The answer is the same every time. No model calls, no scoring, no judgement.
+
+**It doesn't prove:**
+
+- That the agent was smart. If an agent misses a bug on day one, Slipmark will
+  pass that file for as long as it stays unchanged. That is the agent's
+  verdict, faithfully kept.
+- Who wrote the attestation. Treat `.slipmark/attestations/` like any other CI
+  input and protect who can write to it.
+
+So pair it with the checks you already trust. Slipmark is the lock on the
+verdict, not the verdict. If you want stronger verdicts, require more of them:
+coverage of every changed file, two independent reviewers on sensitive paths,
+or a re-review when the model changes. Those policies are in
+[docs/attestation-v2.md](./docs/attestation-v2.md), planned for v0.5.
+
 ## Quick start
 
 In the repository you want to protect (Node 22.6 or later):
@@ -189,7 +216,7 @@ warnings without failing the build. The step's `result` output is `passed` or
 
 **Formatters.** A formatter run changes the bytes, so it breaks a verdict like any other change. Run
 formatters before your agent attests (first in your pre-commit hooks) and most of this goes away.
-Formatting-tolerant hash modes and re-reviewing only the diff are planned for v0.5.
+Formatting-tolerant [hash modes](./docs/hash-modes.md) and re-reviewing only the diff are planned for v0.5.
 
 Run it on the branch you are about to merge. Because it checks content, not
 branch names, a verdict produced on one branch can't clear a different tree.
@@ -478,6 +505,8 @@ npm run demo          # drift diagnosis on the demo pack
 
 - [Verdict attestation](./docs/attestation.md): the schema, the statuses, wiring agents in.
 - [Coding agents](./docs/agents.md): Claude Code, Cursor, Copilot and Codex setup.
+- [Attestation v2](./docs/attestation-v2.md) (draft): richer attestations, coverage, quorum, delta re-attestation, human overrides.
+- [Hash modes](./docs/hash-modes.md) (draft): formatting-tolerant hashing, chosen per path by policy.
 - [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
   the honesty model, repair prompts).
 - [Authoring guide](./docs/authoring.md) — JSON and TypeScript packs, assertion
