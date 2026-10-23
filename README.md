@@ -10,7 +10,7 @@ Add it to a workflow:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.3.0
+- uses: founder-ship-it/Slipmark@v0.4.0
   with:
     require: |
       specs/your-spec.md
@@ -48,7 +48,7 @@ Slipmark does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.3.0`, early. Apache-2.0.
+> Status: `v0.4.0`, early. Apache-2.0. Optional hosted layer: [Slipmark Cloud](#slipmark-cloud).
 
 ## Why the gate exists
 
@@ -62,6 +62,36 @@ nothing.
 So we built the gate: bind every verdict to the hash of what it read, and
 re-check before shipping. Pointed at 23 open agent pull requests, it refused
 all 23.
+
+## What Slipmark proves, and what it doesn't
+
+Slipmark doesn't decide whether your agent is right. It makes sure the verdict
+you are trusting is about the code you are shipping.
+
+**It proves:**
+
+- The verdict was given on these exact bytes. Change one and the verdict stops
+  counting.
+- Every file you require has a current, passing verdict. A missing verdict is
+  a refusal, not a silent pass.
+- The answer is the same every time. No model calls, no scoring, no judgement.
+
+**It doesn't prove:**
+
+- That the agent was smart. If an agent misses a bug on day one, Slipmark will
+  pass that file for as long as it stays unchanged. That is the agent's
+  verdict, faithfully kept.
+- Who wrote an unsigned attestation. Anyone who can push can write
+  `"by": "security-reviewer"`. Require [signed verdicts](#signed-verdicts)
+  and only verdicts signed by a workflow you trust count.
+
+So pair it with the checks you already trust. Slipmark is the lock on the
+verdict, not the verdict. If you want stronger verdicts, require more of them:
+coverage of every changed file, checks Slipmark runs itself, or a re-review
+when the model changes. Those are on `main` now
+([docs/attestation.md](./docs/attestation.md#coverage-every-changed-file-needs-a-verdict)).
+Two independent reviewers on sensitive paths, and the rest of
+[attestation v2](./docs/attestation-v2.md), are next.
 
 ## Quick start
 
@@ -173,11 +203,53 @@ slipmark verify --require specs/invoice-export.md
 Passing verdicts are `pass` and `cleared`. An empty gate is a refusal, never a
 silent pass. `--json` prints the full report for other tools.
 
+**Stronger verdicts** (on `main`, unreleased). Record what the verdict was
+checked against, and let Slipmark run the checks itself:
+
+```bash
+slipmark attest --by reviewer --verdict pass --subject src/export.ts \
+  --against specs/invoice-export.md --run "npm test"
+```
+
+A failing `--run` refuses a passing verdict. Then require a verdict for every
+changed file, not just the ones you listed:
+
+```bash
+slipmark verify --coverage diff --base origin/main
+```
+
+Details in [docs/attestation.md](./docs/attestation.md#version-2-fields).
+
+### Signed verdicts
+
+**Prove who gave the verdict, not just what it was about** (on `main`,
+unreleased). Run the review agent in a GitHub Actions job and sign as it attests:
+
+```bash
+slipmark attest --by security-reviewer --verdict pass --subject src/auth/session.ts --sign
+```
+
+The verdict is signed with the job's own GitHub identity through
+[Sigstore](https://www.sigstore.dev): no keys to manage, and every signature is
+in a public transparency log. Then only count verdicts from the workflow you trust:
+
+```yaml
+- uses: founder-ship-it/Slipmark@main
+  with:
+    require-signed: "true"
+    trusted-signers: |
+      https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main
+```
+
+A verdict typed by hand, made by another workflow, or edited after signing is
+refused. Details, including which ref to trust, in
+[docs/attestation.md](./docs/attestation.md#signed-verdicts).
+
 **As a GitHub Action:**
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.3.0
+- uses: founder-ship-it/Slipmark@v0.4.0
   with:
     require: |
       specs/invoice-export.md
@@ -187,10 +259,60 @@ Rolling it out gently? Set `fail-on-refusal: "false"` to report refusals as
 warnings without failing the build. The step's `result` output is `passed` or
 `refused` either way.
 
+**Formatters.** A formatter run changes the bytes, so it breaks a verdict like any other change. Run
+formatters before your agent attests (first in your pre-commit hooks) and most of this goes away.
+Formatting-tolerant [hash modes](./docs/hash-modes.md) and re-reviewing only the diff are planned for v0.5.
+
 Run it on the branch you are about to merge. Because it checks content, not
 branch names, a verdict produced on one branch can't clear a different tree.
 
 More in [docs/attestation.md](./docs/attestation.md).
+
+## Slipmark Cloud
+
+The gate above is free, open source and needs no account. [Slipmark Cloud](https://app.slipmark.dev)
+is the optional hosted layer for teams that need the record, not just the build result:
+
+- **An append-only, hash-chained ledger** of every run, with a proof page per run. Nothing in it can be edited
+  or deleted, and the chain heads are published daily to Sigstore's public Rekor log, so anyone can check
+  the history wasn't rewritten.
+- **It doesn't take CI's word for it.** Cloud re-reads the attestations and the attested files from GitHub's
+  own copy of the commit and works out every result again.
+- **Rules as a required check.** For example, "changes under `src/auth/**` need a passing verdict from
+  `security-reviewer`", posted to the pull request as **Slipmark policy**. Admins can approve a failing
+  check, but only with a written reason that goes on the record.
+- **Alerts that say what to do.** Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, email, or signed
+  webhooks ([Standard Webhooks](https://www.standardwebhooks.com)) to anything else. Each failure names the rule,
+  the files, the agent that needs to sign off and the command to fix it. Route by repository and rule, and ping
+  the right people. PagerDuty incidents close themselves when the pull request passes.
+- **The Slipmark Slack app.** One thread per pull request, and admins can approve a failing check from Slack with
+  a written reason that goes on the record.
+- **Weekly summary** of runs, blocked pull requests, stale verdicts caught and every override.
+- **Insights and audit evidence packs** for SOC 2 CC8.1 and ISO 27001 change-management controls: a PDF for the
+  auditor with the JSON attached inside it.
+
+Turn it on by installing the [Slipmark GitHub App](https://github.com/apps/slipmark/installations/new) and
+adding two lines to the workflow:
+
+```yaml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # GitHub signs a token saying which repo and run this is. No API key.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: founder-ship-it/Slipmark@v0.4.0
+        with:
+          cloud: "true"
+```
+
+`cloud` never changes the gate result. The gate itself is free for every repository, public or private.
+Cloud is free for public repositories. Private repositories are £15 a seat a month on Team (minimum 3
+seats), with a 14-day free trial. See the
+[quick start](https://app.slipmark.dev/docs/quick-start) and
+[pricing](https://app.slipmark.dev/#pricing).
 
 ## Drift diagnosis: why it's different
 
@@ -360,12 +482,12 @@ slipmark bisect --range "main~30..main" \
 A bisected culprit is the strongest causal evidence Slipmark has: it lifts the
 confidence cap and the precise commit range flows into the repair prompt.
 
-## Dashboard (preview of the hosted cloud)
+## Local dashboard
 
-Slipmark renders a self-contained HTML dashboard — drift trend over runs, lock
-status, confidence bars, and drill-down repair prompts. Today it is backed by a
-local run-history JSON file; the hosted cloud will serve the same view from a
-database + API.
+Slipmark renders a self-contained HTML dashboard: drift trend over runs, lock
+status, confidence bars, and drill-down repair prompts, from a local run-history
+JSON file. For a shared, hosted view across repositories, see
+[Slipmark Cloud](#slipmark-cloud).
 
 ```bash
 # Run a pack and append the result to a rolling history, then render the dashboard:
@@ -375,8 +497,7 @@ slipmark dashboard ./drift.pack.json --history .slipmark/history.json --out dash
 slipmark dashboard --from dashboard/sample-history.json --out dashboard/sample.html
 ```
 
-The `--history` file accumulates runs over time — that flat file is exactly the
-data model the cloud backend will persist. See `dashboard/sample.html` for a
+The `--history` file accumulates runs over time. See `dashboard/sample.html` for a
 rendered example.
 
 ## Coding-agent integration
@@ -415,8 +536,10 @@ overconfidently when the evidence isn't there.
    JSON. ✅
 6. **Verdict attestation, built.** `slipmark attest` / `verify` and a
    GitHub Action bind agent verdicts to SHA-256 hashes and refuse on mismatch. ✅
-7. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
-   add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
+7. **Hosted cloud (open-core), built for attestation.** [Slipmark Cloud](#slipmark-cloud):
+   ledger, server-side re-verification, rules, alerts, evidence packs. ✅
+8. **Attestation v2** *(next)*: which model gave a verdict, checks Slipmark runs itself, coverage of
+   every changed file, quorum on sensitive paths, and formatting-tolerant hash modes.
 
 ## Developing Slipmark
 
@@ -431,6 +554,8 @@ npm run demo          # drift diagnosis on the demo pack
 
 - [Verdict attestation](./docs/attestation.md): the schema, the statuses, wiring agents in.
 - [Coding agents](./docs/agents.md): Claude Code, Cursor, Copilot and Codex setup.
+- [Attestation v2](./docs/attestation-v2.md) (draft): richer attestations, coverage, quorum, delta re-attestation, human overrides.
+- [Hash modes](./docs/hash-modes.md) (draft): formatting-tolerant hashing, chosen per path by policy.
 - [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
   the honesty model, repair prompts).
 - [Authoring guide](./docs/authoring.md) — JSON and TypeScript packs, assertion

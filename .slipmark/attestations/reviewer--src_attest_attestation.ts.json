@@ -1,17 +1,31 @@
 {
-  "schema": "slipmark/attestation@1",
+  "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-22T18:01:06.443Z",
+  "at": "2026-10-23T11:53:15.281Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "53785e122dd77f2a5ce25c54d6f1350b9cc8a590b0cb298bf36fa5629266bbd7"
-    },
-    {
-      "path": "docs/attestation.md",
-      "sha256": "8839c1ec7f1cdeec68777d8b4b08aec8f2e80ca7027ca6fe3ad3ed0265ab7ba0"
+      "sha256": "275919d891e92cb75a4743c789aff20afea823a1c0b364a30e6417644bff41cc"
     }
   ],
-  "note": "attestation.ts implements the documented model, statuses, empty-run and --require handling, and path/symlink escape rejection; security notes now state symlink escapes are rejected"
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "17b4475988711e06e733f28ae2a825ad45ad4cffe488fea16ed7ae2def917a62"
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "outputSha256": "eb57084a43d7916f3ce7e304255b1b3c932788382570e738bfa7141df332ad34",
+      "durationMs": 9015,
+      "witnessed": true
+    }
+  ],
+  "note": "Re-reviewed for signed verdicts: signature field shape check, signatures policy validation (require needs trusted), sigCheck keyed by repo-relative file, signature_invalid always refuses, unsigned/signer_not_trusted only when required, signer only on trusted valid signatures, async checkSignatures throws on unchecked when required (exit 2), v1 path keeps signature check on raw JSON; earlier v2 behaviour unchanged"
 }

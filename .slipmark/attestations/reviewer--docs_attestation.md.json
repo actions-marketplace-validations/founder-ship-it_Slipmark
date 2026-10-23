@@ -1,0 +1,22 @@
+{
+  "schema": "slipmark/attestation@2",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-23T11:53:15.341Z",
+  "subjects": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "17b4475988711e06e733f28ae2a825ad45ad4cffe488fea16ed7ae2def917a62"
+    }
+  ],
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "src/attest/attestation.ts",
+      "sha256": "275919d891e92cb75a4743c789aff20afea823a1c0b364a30e6417644bff41cc"
+    }
+  ],
+  "note": "Docs match the code: new statuses, exit 2 when Sigstore is unreachable and signatures are required, policy signatures block, signed-verdicts section incl. pull_request ref warning and public Rekor note"
+}

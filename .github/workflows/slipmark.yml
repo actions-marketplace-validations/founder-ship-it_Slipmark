@@ -77,3 +77,50 @@ jobs:
         run: |
           if [ -z "$PROOF" ]; then echo "::error::No Slipmark Cloud proof link was returned"; exit 1; fi
           echo "::notice title=Slipmark Cloud::$PROOF"
+
+  # End to end: sign a real verdict with this job's GitHub identity through
+  # Sigstore, then check the gate trusts it, refuses an untrusted signer, and
+  # refuses a signed verdict that was edited afterwards.
+  signed-verdicts:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # the identity the verdict is signed with
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+      - name: Sign a verdict and verify it
+        env:
+          ME: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/src"
+          echo 'export const fee = 2;' > "$work/src/pay.ts"
+          cd "$work"
+          node "$GITHUB_WORKSPACE/dist/src/cli.js" attest --by security-reviewer --verdict pass --subject src/pay.ts --sign
+          echo "Signed as: $ME"
+          { echo "### Signed verdict"; echo; echo "Signed as \`$ME\`"; echo; echo '```json'; cat .slipmark/attestations/*.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+          node "$GITHUB_WORKSPACE/dist/src/cli.js" verify --require-signed --trusted-signer "$ME"
+          echo "::notice title=Signed verdicts::Trusted signer accepted"
+
+          set +e
+          node "$GITHUB_WORKSPACE/dist/src/cli.js" verify --require-signed --trusted-signer "https://github.com/someone/else/.github/workflows/x.yml@refs/heads/main"
+          code=$?
+          set -e
+          [ "$code" -eq 1 ] || { echo "::error::Expected an untrusted signer to be refused, got exit $code"; exit 1; }
+          echo "::notice title=Signed verdicts::Untrusted signer refused"
+
+          f=$(ls .slipmark/attestations/*.json)
+          node -e 'const fs=require("fs");const f=process.argv[1];const a=JSON.parse(fs.readFileSync(f));a.note="edited after signing";fs.writeFileSync(f,JSON.stringify(a,null,2))' "$f"
+          set +e
+          node "$GITHUB_WORKSPACE/dist/src/cli.js" verify
+          code=$?
+          set -e
+          [ "$code" -eq 1 ] || { echo "::error::Expected an edited signed verdict to be refused, got exit $code"; exit 1; }
+          echo "::notice title=Signed verdicts::Edited verdict refused"
