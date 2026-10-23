@@ -1,6 +1,6 @@
 {
   "name": "slipmark",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
   "homepage": "https://www.replyintelligencegroup.co.uk/products/slipmark",
   "repository": {

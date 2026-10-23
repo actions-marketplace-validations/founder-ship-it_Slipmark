@@ -7,7 +7,7 @@ disable-model-invocation: true
 Run the Slipmark gate on the current working tree:
 
 ```bash
-npx --yes slipmark@0.3.0 verify
+npx --yes slipmark@0.4.0 verify
 ```
 
 Then report the result in plain language:

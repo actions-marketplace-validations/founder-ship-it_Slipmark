@@ -10,7 +10,7 @@ Add it to a workflow:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.3.0
+- uses: founder-ship-it/Slipmark@v0.4.0
   with:
     require: |
       specs/your-spec.md
@@ -48,7 +48,7 @@ Slipmark does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.3.0`, early. Apache-2.0.
+> Status: `v0.4.0`, early. Apache-2.0. Optional hosted layer: [Slipmark Cloud](#slipmark-cloud).
 
 ## Why the gate exists
 
@@ -177,7 +177,7 @@ silent pass. `--json` prints the full report for other tools.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.3.0
+- uses: founder-ship-it/Slipmark@v0.4.0
   with:
     require: |
       specs/invoice-export.md
@@ -191,6 +191,46 @@ Run it on the branch you are about to merge. Because it checks content, not
 branch names, a verdict produced on one branch can't clear a different tree.
 
 More in [docs/attestation.md](./docs/attestation.md).
+
+## Slipmark Cloud
+
+The gate above is free, open source and needs no account. [Slipmark Cloud](https://app.slipmark.dev)
+is the optional hosted layer for teams that need the record, not just the build result:
+
+- **An append-only, hash-chained ledger** of every run, with a proof page per run. Nothing in it can be edited
+  or deleted, and the chain heads are published daily to Sigstore's public Rekor log, so anyone can check
+  the history wasn't rewritten.
+- **It doesn't take CI's word for it.** Cloud re-reads the attestations and the attested files from GitHub's
+  own copy of the commit and works out every result again.
+- **Rules as a required check.** For example, "changes under `src/auth/**` need a passing verdict from
+  `security-reviewer`", posted to the pull request as **Slipmark policy**. Admins can approve a failing
+  check, but only with a written reason that goes on the record.
+- **Alerts** to Slack, Microsoft Teams, Discord, Google Chat and PagerDuty, or signed webhooks
+  ([Standard Webhooks](https://www.standardwebhooks.com)) to anything else. PagerDuty incidents close
+  themselves when the pull request passes.
+- **Insights and audit evidence packs** for SOC 2 CC8.1 and ISO 27001 change-management controls.
+
+Turn it on by installing the [Slipmark GitHub App](https://github.com/apps/slipmark/installations/new) and
+adding two lines to the workflow:
+
+```yaml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # GitHub signs a token saying which repo and run this is. No API key.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: founder-ship-it/Slipmark@v0.4.0
+        with:
+          cloud: "true"
+```
+
+`cloud` never changes the gate result. Public repositories are free. Private repositories are £15 a seat a
+month on Team (minimum 3 seats), with a 14-day free trial. See the
+[quick start](https://app.slipmark.dev/docs/quick-start) and
+[pricing](https://app.slipmark.dev/#pricing).
 
 ## Drift diagnosis: why it's different
 
@@ -415,8 +455,10 @@ overconfidently when the evidence isn't there.
    JSON. ✅
 6. **Verdict attestation, built.** `slipmark attest` / `verify` and a
    GitHub Action bind agent verdicts to SHA-256 hashes and refuse on mismatch. ✅
-7. **Hosted cloud (open-core)** — turn the run-history file into a database + API,
-   add auth, multi-tenant, shared lock catalogues, RBAC, billing. *(next)*
+7. **Hosted cloud (open-core), built for attestation.** [Slipmark Cloud](#slipmark-cloud):
+   ledger, server-side re-verification, rules, alerts, evidence packs. ✅
+8. **Attestation v2** *(next)*: which model gave a verdict, checks Slipmark runs itself, coverage of
+   every changed file, quorum on sensitive paths, and formatting-tolerant hash modes.
 
 ## Developing Slipmark
 
