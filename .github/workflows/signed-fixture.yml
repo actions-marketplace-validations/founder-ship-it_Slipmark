@@ -1,0 +1,39 @@
+# Makes test/fixtures/signed-attestation.json: a real verdict signed by this
+# workflow through Sigstore, so the tests can check a genuine Fulcio certificate
+# and DSSE envelope without the network. Runs by hand, or when this file changes.
+name: Signed fixture
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/signed-fixture.yml
+
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # commit the fixture
+      id-token: write   # the identity the verdict is signed with
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+      - name: Sign a verdict about a fixed file
+        run: |
+          set -euo pipefail
+          mkdir -p test/fixtures
+          work=$(mktemp -d)
+          mkdir -p "$work/src"
+          printf 'export const fee = 2;\n' > "$work/src/pay.ts"
+          (cd "$work" && node "$GITHUB_WORKSPACE/dist/src/cli.js" attest --by security-reviewer --verdict pass --subject src/pay.ts --note "Signed fixture" --sign --out "$GITHUB_WORKSPACE/test/fixtures/signed-attestation.json")
+          echo "https://github.com/${{ github.workflow_ref }}" > test/fixtures/signed-attestation.identity
+      - name: Commit it
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test/fixtures/signed-attestation.json test/fixtures/signed-attestation.identity
+          git commit -m "test: refresh the signed attestation fixture" || exit 0
+          git push

@@ -81,8 +81,9 @@ you are trusting is about the code you are shipping.
 - That the agent was smart. If an agent misses a bug on day one, Slipmark will
   pass that file for as long as it stays unchanged. That is the agent's
   verdict, faithfully kept.
-- Who wrote the attestation. Treat `.slipmark/attestations/` like any other CI
-  input and protect who can write to it.
+- Who wrote an unsigned attestation. Anyone who can push can write
+  `"by": "security-reviewer"`. Require [signed verdicts](#signed-verdicts)
+  and only verdicts signed by a workflow you trust count.
 
 So pair it with the checks you already trust. Slipmark is the lock on the
 verdict, not the verdict. If you want stronger verdicts, require more of them:
@@ -218,6 +219,31 @@ slipmark verify --coverage diff --base origin/main
 ```
 
 Details in [docs/attestation.md](./docs/attestation.md#version-2-fields).
+
+### Signed verdicts
+
+**Prove who gave the verdict, not just what it was about** (on `main`,
+unreleased). Run the review agent in a GitHub Actions job and sign as it attests:
+
+```bash
+slipmark attest --by security-reviewer --verdict pass --subject src/auth/session.ts --sign
+```
+
+The verdict is signed with the job's own GitHub identity through
+[Sigstore](https://www.sigstore.dev): no keys to manage, and every signature is
+in a public transparency log. Then only count verdicts from the workflow you trust:
+
+```yaml
+- uses: founder-ship-it/Slipmark@main
+  with:
+    require-signed: "true"
+    trusted-signers: |
+      https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main
+```
+
+A verdict typed by hand, made by another workflow, or edited after signing is
+refused. Details, including which ref to trust, in
+[docs/attestation.md](./docs/attestation.md#signed-verdicts).
 
 **As a GitHub Action:**
 

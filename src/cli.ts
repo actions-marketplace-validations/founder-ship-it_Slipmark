@@ -19,7 +19,8 @@ import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeC
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 import type { DashboardData } from "./dashboard/data.js";
-import { createAttestation, writeAttestation, defaultAttestationPath, verifyAttestations, loadPolicy, POLICY_SCHEMA, type Policy, type VerifyReport, type AttesterKind } from "./attest/attestation.js";
+import { createAttestation, writeAttestation, defaultAttestationPath, verifyWithSignatures, loadPolicy, POLICY_SCHEMA, type Policy, type VerifyReport, type AttesterKind } from "./attest/attestation.js";
+import { signAttestation } from "./attest/signing.js";
 import { existsSync } from "node:fs";
 import { planInit, applyInit } from "./init.js";
 import { uploadRun, summaryMarkdown } from "./cloud/upload.js";
@@ -52,11 +53,13 @@ attest
   [--check "<command>=<exit code>"...]  record a check the agent says it ran (a claim)
   [--model <name>] [--harness <name>] [--kind agent|tool|human]
   [--note "..."] [--dir .slipmark/attestations] [--out <file>]
+  [--sign]                   sign it with this job's identity (GitHub Actions, id-token: write)
   A passing verdict is refused if any --run or --check exited non-zero.
 
 verify
   [--dir .slipmark/attestations] [--require <file>...] [--json]
   [--coverage diff --base <ref> [--ignore <glob>...]]  every changed file needs a verdict
+  [--require-signed --trusted-signer <identity>...]  only count verdicts signed by these
   [--no-policy]              ignore .slipmark/policy.json
   Exit 0: every verdict matches the files as they are now. Exit 1: refused.
   Exit 2: could not run (bad input, or the coverage base is missing).
@@ -89,13 +92,23 @@ function policyFromArgs(args: string[]): Policy | null {
     if (!base) fail("--coverage diff needs --base <ref>, for example --base origin/main");
     policy = { ...(policy ?? { schema: POLICY_SCHEMA }), coverage: { mode: "diff", base: base!, ignore: argVals(args, "--ignore") } };
   }
+  const trusted = argVals(args, "--trusted-signer");
+  if (args.includes("--require-signed") || trusted.length) {
+    if (args.includes("--require-signed") && !trusted.length && !policy?.signatures?.trusted?.length) {
+      fail("--require-signed needs --trusted-signer <identity>, for example https://github.com/acme/api/.github/workflows/review.yml@refs/heads/main");
+    }
+    const sig = { ...(policy?.signatures ?? {}) };
+    if (args.includes("--require-signed")) sig.require = true;
+    if (trusted.length) sig.trusted = trusted;
+    policy = { ...(policy ?? { schema: POLICY_SCHEMA }), signatures: sig };
+  }
   return policy;
 }
 
-/** verifyAttestations, with input problems (bad policy, missing base) reported as exit 2. */
-function runVerify(args: string[]): VerifyReport {
+/** The gate, signatures included, with input problems (bad policy, missing base, Sigstore unreachable when required) reported as exit 2. */
+async function runVerify(args: string[]): Promise<VerifyReport> {
   try {
-    return verifyAttestations({ dir: argVal(args, "--dir") ?? undefined, require: argVals(args, "--require"), policy: policyFromArgs(args) });
+    return await verifyWithSignatures({ dir: argVal(args, "--dir") ?? undefined, require: argVals(args, "--require"), policy: policyFromArgs(args) });
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));
   }
@@ -104,7 +117,7 @@ function runVerify(args: string[]): VerifyReport {
 /** `slipmark upload [--dir d] [--require f...] [--url u] [--strict]` */
 async function uploadMain(args: string[]): Promise<void> {
   const dir = argVal(args, "--dir") ?? ".slipmark/attestations";
-  const report = runVerify(args);
+  const report = await runVerify(args);
   const result = await uploadRun({
     dir,
     require: argVals(args, "--require"),
@@ -253,8 +266,8 @@ function argVals(args: string[], flag: string): string[] {
   return out;
 }
 
-/** `slipmark attest --by <agent> --verdict <v> --subject <file>... [--note t] [--out f] [--dir d]` */
-function attestMain(args: string[]): void {
+/** `slipmark attest --by <agent> --verdict <v> --subject <file>... [--note t] [--out f] [--dir d] [--sign]` */
+async function attestMain(args: string[]): Promise<void> {
   const by = argVal(args, "--by");
   const verdict = argVal(args, "--verdict");
   const subjects = argVals(args, "--subject");
@@ -284,19 +297,27 @@ function attestMain(args: string[]): void {
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));
   }
+  if (args.includes("--sign")) {
+    try {
+      att = await signAttestation(att!);
+    } catch (e) {
+      fail(`couldn't sign: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   const dir = resolve(argVal(args, "--dir") ?? ".slipmark/attestations");
-  const out = argVal(args, "--out") ? resolve(argVal(args, "--out")!) : defaultAttestationPath(dir, att);
-  writeAttestation(out, att);
+  const out = argVal(args, "--out") ? resolve(argVal(args, "--out")!) : defaultAttestationPath(dir, att!);
+  writeAttestation(out, att!);
   console.log(`\n  ${att.by} → "${att.verdict}" on ${att.subjects.length} file(s)`);
   for (const s of att.subjects) console.log(`    ${s.sha256.slice(0, 12)}  ${s.path}`);
   for (const a of att.against ?? []) console.log(`    ${a.sha256.slice(0, 12)}  ${a.path} (checked against)`);
   for (const c of att.checks ?? []) console.log(`    ${c.witnessed ? "ran" : "claimed"}: ${c.command} → exit ${c.exitCode}`);
+  if (att!.signature) console.log("    signed: Sigstore bundle with this job's identity, logged in Rekor");
   console.log(`  written → ${relative(process.cwd(), out)}\n`);
 }
 
 /** `slipmark verify [--dir d] [--require <file>...] [--json]` */
-function verifyMain(args: string[]): void {
-  const report = runVerify(args);
+async function verifyMain(args: string[]): Promise<void> {
+  const report = await runVerify(args);
   if (args.includes("--json")) {
     console.log(JSON.stringify(report, null, 2));
     process.exit(report.ok ? 0 : 1);
@@ -346,11 +367,11 @@ async function main() {
     return;
   }
   if (args[0] === "attest") {
-    attestMain(args.slice(1));
+    await attestMain(args.slice(1));
     return;
   }
   if (args[0] === "verify") {
-    verifyMain(args.slice(1));
+    await verifyMain(args.slice(1));
     return;
   }
   if (args[0] === "dashboard") {

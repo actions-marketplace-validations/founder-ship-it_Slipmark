@@ -2,11 +2,11 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-23T07:31:29.909Z",
+  "at": "2026-10-23T11:53:15.281Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "619e5c15f90fed1061a9aa9ca0745e0ae31c4fe44478246d2d58cbe9de5e7f92"
+      "sha256": "275919d891e92cb75a4743c789aff20afea823a1c0b364a30e6417644bff41cc"
     }
   ],
   "agent": {
@@ -15,17 +15,17 @@
   "against": [
     {
       "path": "docs/attestation.md",
-      "sha256": "054d2637885f42d27661ee2943fe0e2c873cb8cd27373831f8383ae106853cbc"
+      "sha256": "17b4475988711e06e733f28ae2a825ad45ad4cffe488fea16ed7ae2def917a62"
     }
   ],
   "checks": [
     {
       "command": "npm test",
       "exitCode": 0,
-      "outputSha256": "04e1c53dd1a241778445791f774839cff008c77387ebb064ad73a1d810d3798e",
-      "durationMs": 6975,
+      "outputSha256": "eb57084a43d7916f3ce7e304255b1b3c932788382570e738bfa7141df332ad34",
+      "durationMs": 9015,
       "witnessed": true
     }
   ],
-  "note": "Re-reviewed v2 schema, against, run/check refusal, models.allow, coverage (dir links, base checks, root-only), policy loading incl. subfolder refusal and --no-policy, v1 field stripping, exit codes; all prior repros refuse"
+  "note": "Re-reviewed for signed verdicts: signature field shape check, signatures policy validation (require needs trusted), sigCheck keyed by repo-relative file, signature_invalid always refuses, unsigned/signer_not_trusted only when required, signer only on trusted valid signatures, async checkSignatures throws on unchecked when required (exit 2), v1 path keeps signature check on raw JSON; earlier v2 behaviour unchanged"
 }

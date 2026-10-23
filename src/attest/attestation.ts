@@ -14,6 +14,7 @@
  * Everything here is pure Node: `node:crypto`, `node:fs`, `node:path`.
  */
 import { createHash } from "node:crypto";
+import { checkSignature, type AttestationSignature, type SignatureCheck, type SignaturePolicy } from "./signing.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -83,6 +84,8 @@ export interface Attestation {
   against?: AttestedSubject[];
   /** v2. Checks behind the verdict. */
   checks?: AttestedCheck[];
+  /** Sigstore signature over the rest of the attestation, made where the verdict was given. See signing.ts. */
+  signature?: AttestationSignature;
 }
 
 /** `.slipmark/policy.json`. Optional: without it, verify behaves exactly as before. */
@@ -90,6 +93,8 @@ export interface Policy {
   schema: typeof POLICY_SCHEMA;
   coverage?: { mode: "diff"; base: string; ignore?: string[] };
   models?: { allow: string[] };
+  /** Signed verdicts: who may sign, and whether unsigned verdicts count. */
+  signatures?: SignaturePolicy;
 }
 
 export type CheckStatus =
@@ -102,7 +107,10 @@ export type CheckStatus =
   | "uncovered"
   | "against_changed"
   | "check_failed"
-  | "model_not_allowed";
+  | "model_not_allowed"
+  | "unsigned"
+  | "signature_invalid"
+  | "signer_not_trusted";
 
 export interface CheckResult {
   status: CheckStatus;
@@ -114,6 +122,8 @@ export interface CheckResult {
   verdict?: string;
   expected?: string;
   actual?: string;
+  /** Who signed the verdict, when it carries a valid signature: for GitHub Actions, the workflow and ref. */
+  signer?: string;
   message: string;
 }
 
@@ -299,6 +309,7 @@ function isAttestation(v: unknown): v is Attestation {
   const a = v as Record<string, unknown>;
   const base =
     typeof a.by === "string" && typeof a.verdict === "string" && isSubjectList(a.subjects, false);
+  if (a.signature !== undefined && !(a.signature && typeof a.signature === "object" && (a.signature as { bundle?: unknown }).bundle && typeof (a.signature as { bundle?: unknown }).bundle === "object")) return false;
   if (a.schema === ATTESTATION_SCHEMA) return base;
   if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
   if (a.against !== undefined && !isSubjectList(a.against, true)) return false;
@@ -375,6 +386,18 @@ export function loadPolicy(root: string): Policy | null {
   if (models !== undefined && !(models && typeof models === "object" && Array.isArray(models.allow) && models.allow.every((m) => typeof m === "string"))) {
     throw new Error(`${POLICY_FILE}: models.allow must be a list of model names`);
   }
+  const sig = policy.signatures;
+  if (sig !== undefined) {
+    if (!sig || typeof sig !== "object" || Array.isArray(sig)) throw new Error(`${POLICY_FILE}: signatures must be an object`);
+    if (sig.require !== undefined && typeof sig.require !== "boolean") throw new Error(`${POLICY_FILE}: signatures.require must be true or false`);
+    if (sig.trusted !== undefined && !(Array.isArray(sig.trusted) && sig.trusted.every((t) => typeof t === "string" && t.length > 0))) {
+      throw new Error(`${POLICY_FILE}: signatures.trusted must be a list of signer identities`);
+    }
+    if (sig.issuer !== undefined && !(typeof sig.issuer === "string" && /^https:\/\//.test(sig.issuer))) throw new Error(`${POLICY_FILE}: signatures.issuer must be an https URL`);
+    if (sig.require && !sig.trusted?.length) {
+      throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
+    }
+  }
   return policy;
 }
 
@@ -449,6 +472,8 @@ export function verifyAttestations(opts: {
   require?: string[];
   /** Policy to apply. Omitted: read `.slipmark/policy.json` if present. `null`: no policy. */
   policy?: Policy | null;
+  /** Signature checks by attestation file (repo-relative), from checkSignatures. Signed attestations without one count as unsigned. */
+  signatures?: Map<string, SignatureCheck>;
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
@@ -476,6 +501,9 @@ export function verifyAttestations(opts: {
         ? { schema: parsed.schema, by: parsed.by, verdict: parsed.verdict, at: parsed.at, subjects: parsed.subjects, note: parsed.note }
         : parsed;
     const passing = isPassingVerdict(att.verdict);
+    const sigPolicy = policy?.signatures;
+    const sigCheck = (parsed as { signature?: unknown }).signature !== undefined ? opts.signatures?.get(attRel) : undefined;
+    const signer = sigCheck?.state === "valid" && sigCheck.trusted ? sigCheck.identity : undefined;
 
     // Conditions on the attestation as a whole. Any of these and none of its
     // subjects count, so --require and coverage report them as not covered too.
@@ -513,6 +541,16 @@ export function verifyAttestations(opts: {
       const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
       attFailures.push({ ...who, status: "model_not_allowed", message: `${att.by}: ${model}. Policy allows: ${allow.join(", ") || "no models"}` });
     }
+    // A broken signature always refuses: something was changed after signing. Missing or untrusted ones refuse only when the policy requires signatures.
+    if (sigCheck?.state === "invalid") {
+      attFailures.push({ ...who, status: "signature_invalid", message: `${att.by}: ${sigCheck.reason}` });
+    } else if (sigPolicy?.require) {
+      if (!sigCheck || sigCheck.state === "unchecked") {
+        attFailures.push({ ...who, status: "unsigned", message: `${att.by}: verdict isn't signed. Policy requires a signature from ${sigPolicy.trusted?.join(" or ")}` });
+      } else if (sigCheck.state === "valid" && !sigCheck.trusted) {
+        attFailures.push({ ...who, status: "signer_not_trusted", message: `${att.by}: signed by ${sigCheck.identity}, which the policy doesn't trust` });
+      }
+    }
     if (attFailures.length > 0) {
       results.push(...attFailures);
       continue;
@@ -546,7 +584,7 @@ export function verifyAttestations(opts: {
         continue;
       }
       covered.add(relKey);
-      results.push({ ...base, status: "verified", message: `${att.by} verified ${s.path}` });
+      results.push({ ...base, status: "verified", ...(signer ? { signer } : {}), message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
 
@@ -593,4 +631,48 @@ export function verifyAttestations(opts: {
     return { ok: false, checked: 0, results: [empty], failures: [empty] };
   }
   return { ok, checked, results, failures };
+}
+
+/**
+ * Check the signature on every signed attestation in `dir`. Sigstore needs the network,
+ * so this is the async step before verifyAttestations. When the policy requires
+ * signatures and one can't be checked, it throws: that's "couldn't run", not a pass.
+ */
+export async function checkSignatures(opts: {
+  root?: string;
+  dir?: string;
+  policy?: Policy | null;
+  verify?: Parameters<typeof checkSignature>[2];
+}): Promise<Map<string, SignatureCheck>> {
+  const root = resolve(opts.root ?? process.cwd());
+  const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
+  const sigPolicy = opts.policy?.signatures;
+  const out = new Map<string, SignatureCheck>();
+  for (const file of listAttestationFiles(dir)) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue; // reported as invalid by verifyAttestations
+    }
+    if (!raw || typeof raw !== "object" || (raw as { signature?: unknown }).signature === undefined) continue;
+    const check = await checkSignature(raw as Record<string, unknown>, sigPolicy, opts.verify);
+    if (check.state === "unchecked" && sigPolicy?.require) throw new Error(`couldn't check signatures: ${check.reason}`);
+    out.set(toPosix(relative(root, file)), check);
+  }
+  return out;
+}
+
+/** The whole gate, signatures included. */
+export async function verifyWithSignatures(opts: {
+  root?: string;
+  dir?: string;
+  require?: string[];
+  policy?: Policy | null;
+  verify?: Parameters<typeof checkSignature>[2];
+}): Promise<VerifyReport> {
+  const root = resolve(opts.root ?? process.cwd());
+  const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
+  const signatures = await checkSignatures({ root, dir: opts.dir, policy, verify: opts.verify });
+  return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures });
 }

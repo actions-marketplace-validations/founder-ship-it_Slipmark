@@ -125,7 +125,8 @@ the spec, the old verdict will (correctly) stop clearing.
 
 ```bash
 slipmark verify [--dir .slipmark/attestations] [--require <file>...] [--json]
-                [--coverage diff --base <ref> [--ignore <glob>...]] [--no-policy]
+                [--coverage diff --base <ref> [--ignore <glob>...]]
+                [--require-signed --trusted-signer <identity>...] [--no-policy]
 ```
 
 Exit code 0 means every attested file matches and every verdict passes. Exit
@@ -143,17 +144,21 @@ code 1 means the gate refused.
 | `check_failed` | A check recorded a non-zero exit code (witnessed or claimed) |
 | `model_not_allowed` | The policy lists allowed models and this verdict's model isn't one, or it has none |
 | `uncovered` | Coverage is on and a changed file has no current, passing verdict |
+| `signature_invalid` | The verdict is signed, but the signature doesn't verify or the attestation was edited after signing |
+| `unsigned` | Signatures are required and this verdict isn't signed |
+| `signer_not_trusted` | Signatures are required and this verdict was signed by an identity the policy doesn't trust |
 
 A version 1 attestation is judged on version 1 fields only. Anything else in
 it is ignored.
 
-When an attestation fails on `against_changed`, `check_failed` or
-`model_not_allowed`, none of its subjects count. So `--require` and coverage
+When an attestation fails on `against_changed`, `check_failed`,
+`model_not_allowed` or any signature status, none of its subjects count. So `--require` and coverage
 report them as not covered too.
 
 Exit code 2 means the command couldn't run. For `verify`: a malformed policy,
 a coverage base that isn't in the checkout or isn't a plain ref, coverage run
-from somewhere other than the repository root, or a flag given with no value.
+from somewhere other than the repository root, signatures required but
+Sigstore unreachable, or a flag given with no value.
 For `attest`: a passing verdict refused because a check failed, a missing or
 unreadable subject, or bad input.
 
@@ -206,7 +211,11 @@ Put the same settings in `.slipmark/policy.json` and every `verify` run
 {
   "schema": "slipmark/policy@1",
   "coverage": { "mode": "diff", "base": "origin/main", "ignore": ["docs/**", "**/*.lock"] },
-  "models": { "allow": ["claude-opus-5-5", "claude-sonnet-5-5"] }
+  "models": { "allow": ["claude-opus-5-5", "claude-sonnet-5-5"] },
+  "signatures": {
+    "require": true,
+    "trusted": ["https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main"]
+  }
 }
 ```
 
@@ -215,11 +224,66 @@ Put the same settings in `.slipmark/policy.json` and every `verify` run
   from the list and its verdicts stop counting: that is how you force a
   re-review when you change models. The model is a claimed field, so this
   catches mistakes, not an attester that lies about its model.
+- `signatures`: see [Signed verdicts](#signed-verdicts).
 
 `--no-policy` ignores the file for one run. The file is read from the folder
 `verify` runs in. If it runs from a subfolder while the repository root has a
 policy file, it exits 2 rather than silently skipping the root's rules. Globs support `**`, `*` and `?`
 and match the whole path from the repository root.
+
+## Signed verdicts
+
+An unsigned attestation proves the files haven't changed since the verdict. It
+doesn't prove who gave it: anyone who can push to the repository can write
+`"by": "security-reviewer"`. A signed one does.
+
+```bash
+slipmark attest --by security-reviewer --verdict pass --subject src/auth/session.ts --sign
+```
+
+`--sign` signs the attestation with the identity of the job it runs in, using
+[Sigstore](https://www.sigstore.dev) keyless signing. In GitHub Actions that is
+the workflow itself (it needs `permissions: id-token: write`), for example
+`https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main`.
+There are no keys to manage or leak. The signature covers the whole
+attestation (verdict, agent, every hash, checks and note) as canonical JSON, and
+is recorded in Sigstore's public Rekor transparency log. The Sigstore bundle is
+stored in the attestation's `signature` field. Elsewhere, set
+`SIGSTORE_ID_TOKEN` to an OIDC token Sigstore accepts.
+
+`verify` checks every signature it finds: the certificate chains to Sigstore,
+was issued to a GitHub Actions identity, is in the transparency log, and covers
+exactly the attestation as it is now. A signature that fails any of these
+refuses as `signature_invalid`, whether or not signatures are required, because
+it means the attestation was changed after it was signed.
+
+To make signatures count, require them and list who you trust:
+
+```bash
+slipmark verify --require-signed \
+  --trusted-signer "https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main"
+```
+
+or `signatures.require` and `signatures.trusted` in the policy file, or the
+Action's `require-signed` and `trusted-signers` inputs. Then a verdict typed by
+hand, or made by any other workflow, doesn't count. `*` in a trusted identity
+matches anything. Each verified result names its signer, and Slipmark Cloud
+shows it on the proof record.
+
+**Trust a workflow at a protected ref.** On a pull request, GitHub runs the
+workflow file from the pull request itself, so the identity ends in
+`@refs/pull/<n>/merge` and the author of the pull request controls it. Trust
+the workflow on your default branch (`@refs/heads/main`), run by an event that
+uses that version, such as `push`, `workflow_dispatch` or `pull_request_target`,
+or a reusable workflow pinned to a protected ref. Protect that branch so
+changing the signing workflow needs review.
+
+Signing needs network access to Sigstore. When signatures are required and
+Sigstore can't be reached, `verify` exits 2 rather than passing.
+
+Signing uses Sigstore's public service, so the signing certificate, which names
+the repository and workflow, is published in Rekor. Don't sign in a private
+repository whose name is itself confidential.
 
 ## Why the gate checks content, not branches
 
@@ -235,6 +299,6 @@ merge and a verdict produced anywhere else won't match.
   escape the repository root, or resolve outside it through a symlink are
   rejected and never read.
 - The gate proves a verdict is about the current bytes. It doesn't prove the
-  verdict is right, or that the attestation was written by the agent named in
-  `by`. Protect who can write to the attestation directory as you would any CI
-  input.
+  verdict is right. Unsigned, it doesn't prove who wrote it either: protect who
+  can write to the attestation directory as you would any CI input, or require
+  [signed verdicts](#signed-verdicts) from a workflow you trust.

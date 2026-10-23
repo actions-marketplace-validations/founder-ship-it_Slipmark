@@ -61,6 +61,7 @@ function isAttestation(v) {
   if (!v || typeof v !== "object") return false;
   const a = v;
   const base = typeof a.by === "string" && typeof a.verdict === "string" && isSubjectList(a.subjects, false);
+  if (a.signature !== void 0 && !(a.signature && typeof a.signature === "object" && a.signature.bundle && typeof a.signature.bundle === "object")) return false;
   if (a.schema === ATTESTATION_SCHEMA) return base;
   if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
   if (a.against !== void 0 && !isSubjectList(a.against, true)) return false;
@@ -131,6 +132,18 @@ function loadPolicy(root) {
   if (models !== void 0 && !(models && typeof models === "object" && Array.isArray(models.allow) && models.allow.every((m) => typeof m === "string"))) {
     throw new Error(`${POLICY_FILE}: models.allow must be a list of model names`);
   }
+  const sig = policy.signatures;
+  if (sig !== void 0) {
+    if (!sig || typeof sig !== "object" || Array.isArray(sig)) throw new Error(`${POLICY_FILE}: signatures must be an object`);
+    if (sig.require !== void 0 && typeof sig.require !== "boolean") throw new Error(`${POLICY_FILE}: signatures.require must be true or false`);
+    if (sig.trusted !== void 0 && !(Array.isArray(sig.trusted) && sig.trusted.every((t) => typeof t === "string" && t.length > 0))) {
+      throw new Error(`${POLICY_FILE}: signatures.trusted must be a list of signer identities`);
+    }
+    if (sig.issuer !== void 0 && !(typeof sig.issuer === "string" && /^https:\/\//.test(sig.issuer))) throw new Error(`${POLICY_FILE}: signatures.issuer must be an https URL`);
+    if (sig.require && !sig.trusted?.length) {
+      throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
+    }
+  }
   return policy;
 }
 function checkBase(base) {
@@ -195,6 +208,9 @@ function verifyAttestations(opts) {
     }
     const att = parsed.schema === ATTESTATION_SCHEMA ? { schema: parsed.schema, by: parsed.by, verdict: parsed.verdict, at: parsed.at, subjects: parsed.subjects, note: parsed.note } : parsed;
     const passing = isPassingVerdict(att.verdict);
+    const sigPolicy = policy?.signatures;
+    const sigCheck = parsed.signature !== void 0 ? opts.signatures?.get(attRel) : void 0;
+    const signer = sigCheck?.state === "valid" && sigCheck.trusted ? sigCheck.identity : void 0;
     const attFailures = [];
     const who = { attestation: attRel, by: att.by, verdict: att.verdict };
     for (const a of att.against ?? []) {
@@ -228,6 +244,15 @@ function verifyAttestations(opts) {
       const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
       attFailures.push({ ...who, status: "model_not_allowed", message: `${att.by}: ${model}. Policy allows: ${allow.join(", ") || "no models"}` });
     }
+    if (sigCheck?.state === "invalid") {
+      attFailures.push({ ...who, status: "signature_invalid", message: `${att.by}: ${sigCheck.reason}` });
+    } else if (sigPolicy?.require) {
+      if (!sigCheck || sigCheck.state === "unchecked") {
+        attFailures.push({ ...who, status: "unsigned", message: `${att.by}: verdict isn't signed. Policy requires a signature from ${sigPolicy.trusted?.join(" or ")}` });
+      } else if (sigCheck.state === "valid" && !sigCheck.trusted) {
+        attFailures.push({ ...who, status: "signer_not_trusted", message: `${att.by}: signed by ${sigCheck.identity}, which the policy doesn't trust` });
+      }
+    }
     if (attFailures.length > 0) {
       results.push(...attFailures);
       continue;
@@ -260,7 +285,7 @@ function verifyAttestations(opts) {
         continue;
       }
       covered.add(relKey);
-      results.push({ ...base, status: "verified", message: `${att.by} verified ${s.path}` });
+      results.push({ ...base, status: "verified", ...signer ? { signer } : {}, message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
   const reported = /* @__PURE__ */ new Set();

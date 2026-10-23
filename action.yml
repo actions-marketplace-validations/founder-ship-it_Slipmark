@@ -26,6 +26,14 @@ inputs:
     description: "Globs left out of coverage, one per line, for example 'docs/**'. .slipmark/** is always left out."
     required: false
     default: ""
+  require-signed:
+    description: "Only count verdicts signed (with 'slipmark attest --sign') by one of trusted-signers. Overrides signatures.require in .slipmark/policy.json."
+    required: false
+    default: "false"
+  trusted-signers:
+    description: "Signer identities to trust, one per line, for example 'https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main'. '*' matches anything."
+    required: false
+    default: ""
   fail-on-refusal:
     description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll Slipmark out."
     required: false
@@ -67,6 +75,8 @@ runs:
         DG_COV_BASE: ${{ inputs.coverage-base }}
         DG_COV_IGNORE: ${{ inputs.coverage-ignore }}
         DG_FAIL: ${{ inputs.fail-on-refusal }}
+        DG_REQ_SIGNED: ${{ inputs.require-signed }}
+        DG_SIGNERS: ${{ inputs.trusted-signers }}
         DG_CLOUD: ${{ inputs.cloud }}
         DG_CLOUD_URL: ${{ inputs.cloud-url }}
         DG_CLI: ${{ github.action_path }}/dist/src/cli.js
@@ -85,6 +95,12 @@ runs:
             [ -n "$line" ] && args+=(--ignore "$line")
           done <<< "$DG_COV_IGNORE"
         fi
+        [ "$DG_REQ_SIGNED" = "true" ] && args+=(--require-signed)
+        while IFS= read -r line; do
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+          [ -n "$line" ] && args+=(--trusted-signer "$line")
+        done <<< "$DG_SIGNERS"
         set +e
         node "$DG_CLI" "${args[@]}"
         code=$?

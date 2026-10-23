@@ -21,6 +21,16 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   `check_failed` and `model_not_allowed`.
 - `verify` exits 2 when it can't run (malformed policy, coverage base not in
   the checkout) instead of reporting a refusal.
+- **Signed verdicts.** `slipmark attest --sign` signs the attestation with the
+  job's own identity through Sigstore keyless signing (GitHub Actions with
+  `id-token: write`, or `SIGSTORE_ID_TOKEN`). The bundle is stored in the
+  attestation's `signature` field and logged in Rekor. `verify` checks every
+  signature: one that fails, or an attestation edited after signing, refuses as
+  `signature_invalid`. `--require-signed` with `--trusted-signer <identity>`
+  (or `signatures` in the policy file, or the Action's `require-signed` and
+  `trusted-signers` inputs) counts only verdicts signed by a trusted workflow;
+  others refuse as `unsigned` or `signer_not_trusted`. Verified results name
+  their signer.
 
 ### Changed
 - The Claude Code plugin's stop hook also flags verdicts whose `--against`
