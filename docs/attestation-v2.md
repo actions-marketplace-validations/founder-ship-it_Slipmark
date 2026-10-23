@@ -1,6 +1,11 @@
 # Attestation v2 (draft spec)
 
-> Status: **draft, not implemented.** Target: v0.5. Comments welcome in issues.
+> Status: **partly built.** On `main`, unreleased: `against`, `--run` and
+> `--check`, `agent.model`, `kind`, diff coverage, `models.allow`, and the
+> `against_changed`, `check_failed`, `model_not_allowed` and `uncovered`
+> statuses. Still draft: quorum, per-path rules, `requireWitnessedChecks`,
+> delta re-attestation, human override reasons and hash modes. How to use the
+> built parts: [attestation.md](./attestation.md). Comments welcome in issues.
 
 v1 proves a verdict is about the bytes you are shipping. v2 makes weak
 verdicts harder to get through the gate, without Slipmark ever judging whether
@@ -260,7 +265,9 @@ All v1 statuses keep their meaning.
 
 - `verify` reads `@1` and `@2` side by side. An `@1` attestation is treated as
   `kind: agent`, byte hash only, no model, no checks.
-- `attest` writes `@2` from v0.5. `--schema 1` writes `@1` for older verifiers.
+- `attest` writes `@2` only when a v2 option is used (`--against`, `--run`,
+  `--check`, `--model`, `--harness`, `--kind`). Otherwise it writes `@1`, so
+  older verifiers keep working.
 - With no `policy.json`, v0.5 `verify` gives the same answer as v0.4 on the
   same inputs. That is a release blocker, covered by tests.
 

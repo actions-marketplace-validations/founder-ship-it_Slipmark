@@ -20,17 +20,23 @@ export function staleVerdictsDecision(input: StopHookInput, fallbackCwd: string)
 
   let report;
   try {
-    report = verifyAttestations({ root });
+    // No policy: this hook only asks about stale verdicts, and a coverage base
+    // that isn't fetched locally must not stop it from asking.
+    report = verifyAttestations({ root, policy: null });
   } catch {
     return null; // never get in the way if the check can't run
   }
-  const stale = report.results.filter((r) => r.status === "hash_mismatch" || r.status === "subject_missing");
+  const stale = report.results.filter(
+    (r) => r.status === "hash_mismatch" || r.status === "subject_missing" || r.status === "against_changed",
+  );
   if (stale.length === 0) return null; // honest fails and empty gates are not this hook's business
 
   const lines = stale.map((r) =>
-    r.status === "hash_mismatch"
-      ? `- ${r.subject}: changed after ${r.by} gave "${r.verdict}"`
-      : `- ${r.subject}: attested by ${r.by} but no longer exists`,
+    r.status === "subject_missing"
+      ? `- ${r.subject}: attested by ${r.by} but no longer exists`
+      : r.status === "against_changed"
+        ? `- ${r.subject}: ${r.by} checked against it, and it changed after "${r.verdict}"`
+        : `- ${r.subject}: changed after ${r.by} gave "${r.verdict}"`,
   );
   const reason = [
     `Slipmark: ${stale.length} verdict(s) no longer match the files.`,

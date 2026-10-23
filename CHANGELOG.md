@@ -4,6 +4,31 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Diff coverage.** `slipmark verify --coverage diff --base <ref>` refuses
+  any file changed since the base that no current, passing verdict covers
+  (new status `uncovered`). `--ignore <glob>` leaves paths out. The Action
+  gains `coverage-base` and `coverage-ignore` inputs.
+- **`.slipmark/policy.json`** (`slipmark/policy@1`): coverage settings and
+  `models.allow`. Read automatically by `verify`, `upload` and the Action;
+  `--no-policy` skips it.
+- **Attestation v2 fields**, written only when used, so `@1` stays the
+  default: `--against <file>` (status `against_changed`), `--run "<cmd>"`
+  (Slipmark runs it and records exit code and output hash),
+  `--check "<cmd>=<code>"` (a recorded claim), `--model` /
+  `SLIPMARK_MODEL`, `--harness`, `--kind`. A passing verdict is refused when
+  any check failed. `verify` reads `@1` and `@2`; new statuses
+  `check_failed` and `model_not_allowed`.
+- `verify` exits 2 when it can't run (malformed policy, coverage base not in
+  the checkout) instead of reporting a refusal.
+
+### Changed
+- The Claude Code plugin's stop hook also flags verdicts whose `--against`
+  files changed, and ignores the policy so a missing coverage base never
+  silences it.
+- `upload` receives the same `--require` and coverage settings as `verify`, so
+  Cloud records the same report as the gate.
+
 ## [0.4.0] - 2026-10-23
 
 ### Security

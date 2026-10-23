@@ -1,17 +1,31 @@
 {
-  "schema": "slipmark/attestation@1",
+  "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-22T18:01:06.443Z",
+  "at": "2026-10-23T07:31:29.909Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "53785e122dd77f2a5ce25c54d6f1350b9cc8a590b0cb298bf36fa5629266bbd7"
-    },
-    {
-      "path": "docs/attestation.md",
-      "sha256": "8839c1ec7f1cdeec68777d8b4b08aec8f2e80ca7027ca6fe3ad3ed0265ab7ba0"
+      "sha256": "619e5c15f90fed1061a9aa9ca0745e0ae31c4fe44478246d2d58cbe9de5e7f92"
     }
   ],
-  "note": "attestation.ts implements the documented model, statuses, empty-run and --require handling, and path/symlink escape rejection; security notes now state symlink escapes are rejected"
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "054d2637885f42d27661ee2943fe0e2c873cb8cd27373831f8383ae106853cbc"
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "outputSha256": "04e1c53dd1a241778445791f774839cff008c77387ebb064ad73a1d810d3798e",
+      "durationMs": 6975,
+      "witnessed": true
+    }
+  ],
+  "note": "Re-reviewed v2 schema, against, run/check refusal, models.allow, coverage (dir links, base checks, root-only), policy loading incl. subfolder refusal and --no-policy, v1 field stripping, exit codes; all prior repros refuse"
 }

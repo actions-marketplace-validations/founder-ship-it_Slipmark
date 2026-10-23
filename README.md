@@ -86,9 +86,11 @@ you are trusting is about the code you are shipping.
 
 So pair it with the checks you already trust. Slipmark is the lock on the
 verdict, not the verdict. If you want stronger verdicts, require more of them:
-coverage of every changed file, two independent reviewers on sensitive paths,
-or a re-review when the model changes. Those policies are in
-[docs/attestation-v2.md](./docs/attestation-v2.md), planned for v0.5.
+coverage of every changed file, checks Slipmark runs itself, or a re-review
+when the model changes. Those are on `main` now
+([docs/attestation.md](./docs/attestation.md#coverage-every-changed-file-needs-a-verdict)).
+Two independent reviewers on sensitive paths, and the rest of
+[attestation v2](./docs/attestation-v2.md), are next.
 
 ## Quick start
 
@@ -199,6 +201,23 @@ slipmark verify --require specs/invoice-export.md
 
 Passing verdicts are `pass` and `cleared`. An empty gate is a refusal, never a
 silent pass. `--json` prints the full report for other tools.
+
+**Stronger verdicts** (on `main`, unreleased). Record what the verdict was
+checked against, and let Slipmark run the checks itself:
+
+```bash
+slipmark attest --by reviewer --verdict pass --subject src/export.ts \
+  --against specs/invoice-export.md --run "npm test"
+```
+
+A failing `--run` refuses a passing verdict. Then require a verdict for every
+changed file, not just the ones you listed:
+
+```bash
+slipmark verify --coverage diff --base origin/main
+```
+
+Details in [docs/attestation.md](./docs/attestation.md#version-2-fields).
 
 **As a GitHub Action:**
 

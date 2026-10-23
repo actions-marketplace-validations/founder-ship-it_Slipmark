@@ -1,0 +1,22 @@
+{
+  "schema": "slipmark/attestation@2",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-23T07:31:29.971Z",
+  "subjects": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "054d2637885f42d27661ee2943fe0e2c873cb8cd27373831f8383ae106853cbc"
+    }
+  ],
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "src/attest/attestation.ts",
+      "sha256": "619e5c15f90fed1061a9aa9ca0745e0ae31c4fe44478246d2d58cbe9de5e7f92"
+    }
+  ],
+  "note": "Checked every schema example, status, exit code, coverage, policy and security claim against the code and by reproduction; accurate. Minor: subfolder-with-own-policy case not spelled out"
+}

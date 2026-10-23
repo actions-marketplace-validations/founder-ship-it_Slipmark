@@ -18,6 +18,14 @@ inputs:
     description: "Repository root to verify against."
     required: false
     default: "."
+  coverage-base:
+    description: "Require a current, passing verdict for every file changed since this ref, for example 'origin/main'. Needs actions/checkout with fetch-depth: 0. Overrides coverage in .slipmark/policy.json."
+    required: false
+    default: ""
+  coverage-ignore:
+    description: "Globs left out of coverage, one per line, for example 'docs/**'. .slipmark/** is always left out."
+    required: false
+    default: ""
   fail-on-refusal:
     description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll Slipmark out."
     required: false
@@ -56,6 +64,8 @@ runs:
       env:
         DG_DIR: ${{ inputs.dir }}
         DG_REQUIRE: ${{ inputs.require }}
+        DG_COV_BASE: ${{ inputs.coverage-base }}
+        DG_COV_IGNORE: ${{ inputs.coverage-ignore }}
         DG_FAIL: ${{ inputs.fail-on-refusal }}
         DG_CLOUD: ${{ inputs.cloud }}
         DG_CLOUD_URL: ${{ inputs.cloud-url }}
@@ -67,11 +77,19 @@ runs:
           line="${line%"${line##*[![:space:]]}"}"
           [ -n "$line" ] && args+=(--require "$line")
         done <<< "$DG_REQUIRE"
+        if [ -n "$DG_COV_BASE" ]; then
+          args+=(--coverage diff --base "$DG_COV_BASE")
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -n "$line" ] && args+=(--ignore "$line")
+          done <<< "$DG_COV_IGNORE"
+        fi
         set +e
         node "$DG_CLI" "${args[@]}"
         code=$?
         if [ "$DG_CLOUD" = "true" ]; then
-          up=(upload --dir "$DG_DIR")
+          up=(upload "${args[@]:1}")
           [ -n "$DG_CLOUD_URL" ] && up+=(--url "$DG_CLOUD_URL")
           node "$DG_CLI" "${up[@]}"
         fi

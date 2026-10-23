@@ -10,9 +10,14 @@ import { join as join2 } from "node:path";
 
 // src/attest/attestation.ts
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 var ATTESTATION_SCHEMA = "slipmark/attestation@1";
+var ATTESTATION_SCHEMA_V2 = "slipmark/attestation@2";
+var POLICY_SCHEMA = "slipmark/policy@1";
+var POLICY_FILE = ".slipmark/policy.json";
+var COVERAGE_ALWAYS_IGNORED = [".slipmark/**"];
 var PASSING_VERDICTS = ["pass", "cleared"];
 function sha256File(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
@@ -39,12 +44,130 @@ function resolveSubject(root, subject) {
 function toPosix(p) {
   return p.split(sep).join("/");
 }
+function isPassingVerdict(verdict) {
+  return PASSING_VERDICTS.includes(verdict);
+}
+function isSubjectList(v, allowEmpty) {
+  return Array.isArray(v) && (allowEmpty || v.length > 0) && v.every(
+    (s) => s && typeof s === "object" && typeof s.path === "string" && typeof s.sha256 === "string" && /^[0-9a-f]{64}$/.test(s.sha256)
+  );
+}
+function isCheckList(v) {
+  return Array.isArray(v) && v.every(
+    (c) => c && typeof c === "object" && typeof c.command === "string" && Number.isInteger(c.exitCode) && typeof c.witnessed === "boolean"
+  );
+}
 function isAttestation(v) {
   if (!v || typeof v !== "object") return false;
   const a = v;
-  return a.schema === ATTESTATION_SCHEMA && typeof a.by === "string" && typeof a.verdict === "string" && Array.isArray(a.subjects) && a.subjects.length > 0 && a.subjects.every(
-    (s) => s && typeof s === "object" && typeof s.path === "string" && typeof s.sha256 === "string" && /^[0-9a-f]{64}$/.test(s.sha256)
-  );
+  const base = typeof a.by === "string" && typeof a.verdict === "string" && isSubjectList(a.subjects, false);
+  if (a.schema === ATTESTATION_SCHEMA) return base;
+  if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
+  if (a.against !== void 0 && !isSubjectList(a.against, true)) return false;
+  if (a.checks !== void 0 && !isCheckList(a.checks)) return false;
+  if (a.kind !== void 0 && !["agent", "tool", "human"].includes(a.kind)) return false;
+  if (a.agent !== void 0) {
+    if (!a.agent || typeof a.agent !== "object") return false;
+    const model = a.agent.model;
+    if (model !== void 0 && typeof model !== "string") return false;
+  }
+  return true;
+}
+function globToRegExp(glob) {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        i++;
+        if (glob[i + 1] === "/") {
+          i++;
+          re += "(?:.*/)?";
+        } else re += ".*";
+      } else re += "[^/]*";
+    } else if (c === "?") re += "[^/]";
+    else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+function matchesAny(path, globs) {
+  return globs.some((g) => globToRegExp(g).test(path));
+}
+function loadPolicy(root) {
+  const file = join(resolve(root), POLICY_FILE);
+  if (!existsSync(file)) {
+    let top = null;
+    try {
+      top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: resolve(root), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      top = null;
+    }
+    if (top && realpathSync(top) !== realpathSync(resolve(root)) && existsSync(join(top, POLICY_FILE))) {
+      throw new Error(`${POLICY_FILE} is at the repository root (${top}). Run from there, or pass --no-policy to skip it on purpose.`);
+    }
+    return null;
+  }
+  let p;
+  try {
+    p = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new Error(`${POLICY_FILE} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const policy = p;
+  if (!policy || typeof policy !== "object" || Array.isArray(policy) || policy.schema !== POLICY_SCHEMA) {
+    throw new Error(`${POLICY_FILE} must have "schema": "${POLICY_SCHEMA}"`);
+  }
+  const cov = policy.coverage;
+  if (cov !== void 0) {
+    if (!cov || typeof cov !== "object" || cov.mode !== "diff" || typeof cov.base !== "string" || !cov.base) {
+      throw new Error(`${POLICY_FILE}: coverage needs "mode": "diff" and a "base" ref`);
+    }
+    checkBase(cov.base);
+    if (cov.ignore !== void 0 && !(Array.isArray(cov.ignore) && cov.ignore.every((g) => typeof g === "string"))) {
+      throw new Error(`${POLICY_FILE}: coverage.ignore must be a list of globs`);
+    }
+  }
+  const models = policy.models;
+  if (models !== void 0 && !(models && typeof models === "object" && Array.isArray(models.allow) && models.allow.every((m) => typeof m === "string"))) {
+    throw new Error(`${POLICY_FILE}: models.allow must be a list of model names`);
+  }
+  return policy;
+}
+function checkBase(base) {
+  if (!base || base.startsWith("-") || /[\0\s]/.test(base)) {
+    throw new Error(`coverage base must be a git ref such as origin/main, not "${base}"`);
+  }
+  if (base === "HEAD" || base === "@") {
+    throw new Error(`coverage base "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
+  }
+}
+function git(root, args) {
+  return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+function changedFiles(root, base) {
+  checkBase(base);
+  let top;
+  try {
+    top = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    throw new Error("coverage: this folder is not inside a git repository");
+  }
+  if (realpathSync(top) !== realpathSync(root)) {
+    throw new Error(`coverage: run from the repository root (${top}), not a subfolder. From a subfolder it would miss changes elsewhere in the repo.`);
+  }
+  let mergeBase;
+  try {
+    const commit = git(root, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`]).trim();
+    mergeBase = git(root, ["merge-base", commit, "HEAD"]).trim();
+  } catch {
+    throw new Error(
+      `coverage: can't find the base "${base}" in this checkout. In GitHub Actions, use actions/checkout with fetch-depth: 0.`
+    );
+  }
+  const split = (out2) => out2.split("\0").filter(Boolean);
+  const changed = split(git(root, ["diff", "--name-only", "-z", "--relative", "--diff-filter=d", mergeBase, "--"]));
+  const untracked = split(git(root, ["ls-files", "--others", "--exclude-standard", "-z"]));
+  return [.../* @__PURE__ */ new Set([...changed, ...untracked])].sort();
 }
 function listAttestationFiles(dir) {
   if (!existsSync(dir)) return [];
@@ -53,6 +176,7 @@ function listAttestationFiles(dir) {
 function verifyAttestations(opts) {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
+  const policy = opts.policy === void 0 ? loadPolicy(root) : opts.policy;
   const results = [];
   const covered = /* @__PURE__ */ new Set();
   const files = listAttestationFiles(dir);
@@ -69,8 +193,45 @@ function verifyAttestations(opts) {
       results.push({ status: "invalid", attestation: attRel, message: `not a ${ATTESTATION_SCHEMA} attestation` });
       continue;
     }
-    const att = parsed;
-    const passing = PASSING_VERDICTS.includes(att.verdict);
+    const att = parsed.schema === ATTESTATION_SCHEMA ? { schema: parsed.schema, by: parsed.by, verdict: parsed.verdict, at: parsed.at, subjects: parsed.subjects, note: parsed.note } : parsed;
+    const passing = isPassingVerdict(att.verdict);
+    const attFailures = [];
+    const who = { attestation: attRel, by: att.by, verdict: att.verdict };
+    for (const a of att.against ?? []) {
+      const abs = resolveSubject(root, a.path);
+      if (!abs) {
+        attFailures.push({ ...who, subject: a.path, status: "invalid", message: `against path escapes the repo: ${a.path}` });
+      } else if (!existsSync(abs) || !statSync(abs).isFile()) {
+        attFailures.push({ ...who, subject: a.path, status: "against_changed", message: `${att.by} checked against ${a.path}, which no longer exists` });
+      } else {
+        const actual = sha256File(abs);
+        if (actual !== a.sha256) {
+          attFailures.push({
+            ...who,
+            subject: a.path,
+            status: "against_changed",
+            expected: a.sha256,
+            actual,
+            message: `${att.by} gave "${att.verdict}" against a different version of ${a.path}. It changed after the verdict.`
+          });
+        }
+      }
+    }
+    for (const c of att.checks ?? []) {
+      if (c.exitCode !== 0) {
+        const how = c.witnessed ? "exited" : "was reported as exiting";
+        attFailures.push({ ...who, status: "check_failed", message: `${att.by}: "${c.command}" ${how} ${c.exitCode} when the verdict was recorded` });
+      }
+    }
+    const allow = policy?.models?.allow;
+    if (allow && !(att.agent?.model && allow.includes(att.agent.model))) {
+      const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
+      attFailures.push({ ...who, status: "model_not_allowed", message: `${att.by}: ${model}. Policy allows: ${allow.join(", ") || "no models"}` });
+    }
+    if (attFailures.length > 0) {
+      results.push(...attFailures);
+      continue;
+    }
     for (const s of att.subjects) {
       const abs = resolveSubject(root, s.path);
       const base = { attestation: attRel, subject: s.path, by: att.by, verdict: att.verdict };
@@ -102,11 +263,34 @@ function verifyAttestations(opts) {
       results.push({ ...base, status: "verified", message: `${att.by} verified ${s.path}` });
     }
   }
+  const reported = /* @__PURE__ */ new Set();
   for (const req of opts.require ?? []) {
     const abs = resolveSubject(root, req);
     const key = abs ? toPosix(relative(root, abs)) : req;
     if (!abs || !covered.has(key)) {
+      reported.add(key);
       results.push({ status: "unattested", subject: req, message: `no passing, current attestation covers ${req}` });
+    }
+  }
+  const cov = policy?.coverage;
+  if (cov) {
+    const ignore = [...COVERAGE_ALWAYS_IGNORED, ...cov.ignore ?? []];
+    for (const f of changedFiles(root, cov.base)) {
+      const path = toPosix(f);
+      if (covered.has(path) || reported.has(path) || matchesAny(path, ignore)) continue;
+      let entry;
+      try {
+        entry = lstatSync(join(root, path));
+      } catch {
+        entry = null;
+      }
+      if (entry?.isDirectory()) continue;
+      const abs = resolveSubject(root, path);
+      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) {
+        results.push({ status: "invalid", subject: path, message: `${path} changed since ${cov.base} but can't be verified: it is a link to a folder, outside the repo, or to nothing` });
+        continue;
+      }
+      results.push({ status: "uncovered", subject: path, message: `${path} changed since ${cov.base} and no passing, current verdict covers it` });
     }
   }
   const failures = results.filter((r) => r.status !== "verified");
@@ -126,14 +310,16 @@ function staleVerdictsDecision(input2, fallbackCwd) {
   if (!existsSync2(join2(root, ".slipmark", "attestations"))) return null;
   let report;
   try {
-    report = verifyAttestations({ root });
+    report = verifyAttestations({ root, policy: null });
   } catch {
     return null;
   }
-  const stale = report.results.filter((r) => r.status === "hash_mismatch" || r.status === "subject_missing");
+  const stale = report.results.filter(
+    (r) => r.status === "hash_mismatch" || r.status === "subject_missing" || r.status === "against_changed"
+  );
   if (stale.length === 0) return null;
   const lines = stale.map(
-    (r) => r.status === "hash_mismatch" ? `- ${r.subject}: changed after ${r.by} gave "${r.verdict}"` : `- ${r.subject}: attested by ${r.by} but no longer exists`
+    (r) => r.status === "subject_missing" ? `- ${r.subject}: attested by ${r.by} but no longer exists` : r.status === "against_changed" ? `- ${r.subject}: ${r.by} checked against it, and it changed after "${r.verdict}"` : `- ${r.subject}: changed after ${r.by} gave "${r.verdict}"`
   );
   const reason = [
     `Slipmark: ${stale.length} verdict(s) no longer match the files.`,
