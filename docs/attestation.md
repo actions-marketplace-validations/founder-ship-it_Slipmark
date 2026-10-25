@@ -336,8 +336,12 @@ That's enough to start. With it:
    `.toml`, `.py`, `.ts`, `.sh` and similar), which GitHub shows as raw text.
    Any other extension, or none, is treated as Markdown. Other markup GitHub
    renders, with comments of its own (`.rst`, `.adoc`, `.org`, `.textile`,
-   `.svg` and similar), is refused in agent context: write instructions in
-   Markdown. Any finding is
+   `.svg`, notebooks and similar), is refused in agent context: write
+   instructions in Markdown. So are blocks GitHub draws instead of showing,
+   which drop their comments: ```` ```mermaid ````, ```` ```math ````,
+   ```` ```geojson ````, ```` ```topojson ```` and ```` ```stl ```` fences, and
+   any line with both `$` and `%` (math hides `%` comments; a line like "costs
+   $5, 80% coverage" is flagged too, so reword or acknowledge it). Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
    not have seen it, unless an approver signs to say they have:
    ```bash

@@ -92,7 +92,7 @@ const MAX_FINDINGS = 50;
  * shown as raw text, where comments are visible. Anything else, including no
  * extension and every Markdown variant, is treated as Markdown: the safe side.
  */
-const OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg)$/i;
+const OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg|ipynb)$/i;
 const SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
 const isMarkdownish = (path: string) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 
@@ -241,6 +241,20 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
         kind: "markdown_comment",
         detail: "\"]:\" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code",
       });
+    }
+    // Fenced blocks GitHub draws instead of showing (diagrams, maps, models, formulas) drop their comments
+    // (%% in Mermaid, % in TeX). Agent instructions don't need them, so they're refused outright.
+    const drawnFence = /^[ \t>]*(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gim;
+    for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1]!.toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
+    }
+    // Inline and block math ($...$, $$...$$) also hides % comments. Any line with both $ and % is flagged.
+    const mathPercent = /^[^\n]*\$[^\n]*%[^\n]*$|^[^\n]*%[^\n]*\$[^\n]*$/gm;
+    for (let m = mathPercent.exec(body); m; m = mathPercent.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      if (m[0].length === 0) { mathPercent.lastIndex++; continue; }
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "a % next to $ math: GitHub renders math and hides % comments in it" });
     }
     // Inline link titles show only on hover, like a definition's title.
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;

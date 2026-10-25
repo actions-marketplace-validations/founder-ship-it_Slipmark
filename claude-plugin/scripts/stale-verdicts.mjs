@@ -2196,7 +2196,7 @@ var BLANK_RUN = 20;
 var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 var MAX_SCAN = 512 * 1024;
 var MAX_FINDINGS = 50;
-var OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg)$/i;
+var OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg|ipynb)$/i;
 var SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
 var isMarkdownish = (path) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 var normLabel = (l) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
@@ -2310,6 +2310,20 @@ function scanHiddenContent(path, text) {
         kind: "markdown_comment",
         detail: `"]:" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code`
       });
+    }
+    const drawnFence = /^[ \t>]*(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gim;
+    for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1].toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
+    }
+    const mathPercent = /^[^\n]*\$[^\n]*%[^\n]*$|^[^\n]*%[^\n]*\$[^\n]*$/gm;
+    for (let m = mathPercent.exec(body); m; m = mathPercent.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (m[0].length === 0) {
+        mathPercent.lastIndex++;
+        continue;
+      }
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "a % next to $ math: GitHub renders math and hides % comments in it" });
     }
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
