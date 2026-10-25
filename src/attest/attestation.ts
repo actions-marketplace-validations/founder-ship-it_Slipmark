@@ -15,8 +15,10 @@
  */
 import { createHash } from "node:crypto";
 import { checkSignature, type AttestationSignature, type SignatureCheck, type SignaturePolicy } from "./signing.js";
+import { DEFAULT_CONTEXT_FILES, scanHiddenContent } from "./context.js";
+import { identityMatches } from "./signing.js";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const ATTESTATION_SCHEMA = "slipmark/attestation@1";
@@ -84,6 +86,12 @@ export interface Attestation {
   against?: AttestedSubject[];
   /** v2. Checks behind the verdict. */
   checks?: AttestedCheck[];
+  /**
+   * v2. The agent context the verdict was given under: instruction files, skills,
+   * hooks and MCP configs, with their hashes as they were on disk when the verdict
+   * was recorded. If any of them changes, the verdict stops counting.
+   */
+  context?: AttestedSubject[];
   /** Sigstore signature over the rest of the attestation, made where the verdict was given. See signing.ts. */
   signature?: AttestationSignature;
 }
@@ -101,6 +109,26 @@ export interface Policy {
    * request can't loosen it.
    */
   require?: string[];
+  /** Agent context rules. See docs/attestation.md, "Agent context". */
+  context?: ContextPolicy;
+}
+
+export interface ContextPolicy {
+  /** Globs for agent context files. Default: DEFAULT_CONTEXT_FILES. */
+  files?: string[];
+  /** Who may approve a change to a context file: verdicts of these kinds covering it. Default ["human"]. */
+  approvers?: AttesterKind[];
+  /**
+   * Signer identities whose signed verdicts can approve a context change, for
+   * example a workflow that only runs after a CODEOWNERS review. `*` matches
+   * anything. When set, an approval counts only if signed by one of these.
+   * Without it, the approver's `kind` is a claim anyone can write.
+   */
+  approverSigners?: string[];
+  /** Agent verdicts must record their context (`slipmark attest` does this when the policy has a context section). Default true. */
+  requireRecorded?: boolean;
+  /** Changed context files with text hidden from human reviewers: "refuse" (default) or "allow". */
+  hiddenContent?: "refuse" | "allow";
 }
 
 /**
@@ -118,6 +146,8 @@ export interface PolicySource {
   changedOnBranch?: boolean;
   /** Plain-language notes for the report, for example why the base couldn't be used. */
   notes?: string[];
+  /** A base was expected (a pull request, a coverage base) but isn't in the checkout. */
+  baseMissing?: string;
 }
 
 export type CheckStatus =
@@ -133,7 +163,10 @@ export type CheckStatus =
   | "model_not_allowed"
   | "unsigned"
   | "signature_invalid"
-  | "signer_not_trusted";
+  | "signer_not_trusted"
+  | "context_changed"
+  | "context_unapproved"
+  | "hidden_content";
 
 export interface CheckResult {
   status: CheckStatus;
@@ -157,6 +190,8 @@ export interface VerifyReport {
   failures: CheckResult[];
   /** Which policy file made the decision. */
   policy?: PolicySource;
+  /** Things the reader should know that didn't refuse the gate. */
+  notes?: string[];
 }
 
 export function sha256File(filePath: string): string {
@@ -244,6 +279,8 @@ export function createAttestation(opts: {
   checks?: { command: string; exitCode: number }[];
   kind?: AttesterKind;
   agent?: AgentInfo;
+  /** Record the agent context: true for the default context files, or a list of globs. */
+  context?: boolean | string[];
   /** Test hook: replaces runCheck. */
   runner?: (root: string, command: string) => AttestedCheck;
 }): Attestation {
@@ -271,7 +308,8 @@ export function createAttestation(opts: {
   if (opts.agent?.model) agent.model = opts.agent.model;
   if (opts.agent?.harness) agent.harness = opts.agent.harness;
   if (opts.agent?.harnessVersion) agent.harnessVersion = opts.agent.harnessVersion;
-  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined;
+  const context = opts.context ? contextDigests(root, opts.context === true ? DEFAULT_CONTEXT_FILES : opts.context) : undefined;
+  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined;
 
   const att: Attestation = {
     schema: v2 ? ATTESTATION_SCHEMA_V2 : ATTESTATION_SCHEMA,
@@ -284,8 +322,141 @@ export function createAttestation(opts: {
   if (Object.keys(agent).length > 0) att.agent = agent;
   if (against.length > 0) att.against = against;
   if (checks.length > 0) att.checks = checks;
+  if (context !== undefined) att.context = context;
   if (opts.note) att.note = opts.note;
   return att;
+}
+
+/**
+ * Glob test for agent context. At the repository root and inside dot-folders
+ * (.claude, .cursor, ...) case is ignored: agents on macOS and Windows open
+ * claude.md as CLAUDE.md. Deeper in the tree it isn't, so ordinary docs such as
+ * docs/providers/claude.md don't count as agent instructions.
+ */
+function contextMatch(path: string, globs: string[]): boolean {
+  const ignoreCase = !path.includes("/") || path.startsWith(".");
+  return globs.some((g) => (ignoreCase ? new RegExp(globToRegExp(g).source, "i") : globToRegExp(g)).test(path));
+}
+
+/** A link (or anything that isn't a regular file) where agent context would be. */
+export interface ContextProblem {
+  path: string;
+  message: string;
+}
+
+/**
+ * Agent context in the repo: tracked and untracked files (git ignores excluded)
+ * matching `globs`, case-insensitively. Outside git, a walk of the tree that
+ * skips .git and node_modules. .slipmark/ is never context.
+ *
+ * A link is allowed only when it points at another context file in the repo
+ * (CLAUDE.md -> AGENTS.md is common); its content is hashed through the link.
+ * Any other link, including a linked folder such as .claude -> tools/cfg, is a
+ * problem: it would put instructions outside what the gate watches.
+ */
+export function scanContext(root: string, globs: string[]): { files: string[]; problems: ContextProblem[] } {
+  root = resolve(root);
+  let all: string[];
+  try {
+    all = git(root, ["ls-files", "-co", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
+  } catch {
+    all = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+        const p = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) {
+          if (e.name !== ".git" && e.name !== "node_modules") walk(p);
+        } else all.push(p);
+      }
+    };
+    walk("");
+  }
+  const files: string[] = [];
+  const problems: ContextProblem[] = [];
+  // A path is context if it matches, or if it is a folder some glob reaches into (a linked .claude, say).
+  const reachesInto = (p: string) =>
+    globs.some((g) => {
+      const fixed = g.split(/[*?]/)[0]!; // the literal start of the glob, like ".claude/" or ".github/instructions/"
+      return fixed.toLowerCase().startsWith(p.toLowerCase() + "/") || contextMatch(`${p}/x`, globs);
+    });
+  // Submodules (gitlinks): their content is another repository the gate can't hash. At a context path, refused like a link.
+  let gitlinks: string[] = [];
+  try {
+    gitlinks = git(root, ["ls-files", "-s", "-z"])
+      .split("\0")
+      .filter((e) => e.startsWith("160000 "))
+      .map((e) => toPosix(e.slice(e.indexOf("\t") + 1)));
+  } catch {
+    gitlinks = [];
+  }
+  for (const g of gitlinks) {
+    if (contextMatch(g, globs) || reachesInto(g)) {
+      problems.push({ path: g, message: `${g} is a submodule. Agent context must be real files in this repository, so every instruction is watched.` });
+    }
+  }
+  const skip = new Set(gitlinks);
+  for (const p of [...new Set(all.map(toPosix))].sort()) {
+    if (p.startsWith(".slipmark/") || skip.has(p)) continue;
+    const abs = join(root, p);
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      continue; // listed by git but gone from disk
+    }
+    const isContext = contextMatch(p, globs);
+    if (st.isSymbolicLink()) {
+      if (!isContext && !reachesInto(p)) continue;
+      let target: string | null = null;
+      try {
+        target = toPosix(relative(realpathSync(root), realpathSync(abs)));
+      } catch {
+        target = null;
+      }
+      const ok =
+        isContext &&
+        target !== null &&
+        !target.startsWith("..") &&
+        !isAbsolute(target) &&
+        contextMatch(target, globs) &&
+        statSync(abs).isFile();
+      if (ok) files.push(p);
+      else problems.push({ path: p, message: `${p} is a link${target ? ` to ${target}` : ""}. Agent context must be real files in the repo, or links to other context files, so every instruction is watched.` });
+      continue;
+    }
+    if (isContext && st.isFile()) files.push(p);
+  }
+  return { files, problems };
+}
+
+/** Agent context files in the repo matching `globs`. See scanContext. */
+export function listContextFiles(root: string, globs: string[]): string[] {
+  return scanContext(root, globs).files;
+}
+
+/** Hashes of the agent context, as recorded on an attestation. Must run from the repository root. */
+export function contextDigests(root: string, globs: string[]): AttestedSubject[] {
+  root = resolve(root);
+  requireRepoRoot(root, "agent context");
+  const { files, problems } = scanContext(root, globs);
+  const linkHash = (p: string) => createHash("sha256").update(`link:${(() => { try { return readlinkSync(join(root, p)); } catch { return ""; } })()}`).digest("hex");
+  return [
+    ...files.map((p) => ({ path: p, sha256: sha256File(join(root, p)) })),
+    ...problems.map((x) => ({ path: x.path, sha256: linkHash(x.path) })),
+  ].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Context is about the whole repository: a subfolder run would miss the root's AGENTS.md. In a git repo, `root` must be its top. */
+function requireRepoRoot(root: string, what: string): void {
+  let top: string;
+  try {
+    top = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    return; // not a git repository: the folder is the whole tree
+  }
+  if (realpathSync(top) !== realpathSync(root)) {
+    throw new Error(`${what}: run from the repository root (${top}), not a subfolder. Agents in a subfolder still read the root's instructions, so the check covers the whole repository.`);
+  }
 }
 
 /** Default file name for an attestation: one per agent per first subject. */
@@ -339,6 +510,7 @@ function isAttestation(v: unknown): v is Attestation {
   if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
   if (a.against !== undefined && !isSubjectList(a.against, true)) return false;
   if (a.checks !== undefined && !isCheckList(a.checks)) return false;
+  if (a.context !== undefined && !isSubjectList(a.context, true)) return false;
   if (a.kind !== undefined && !["agent", "tool", "human"].includes(a.kind as string)) return false;
   if (a.agent !== undefined) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -428,6 +600,21 @@ export function parsePolicy(text: string, label: string = POLICY_FILE): Policy {
     if (sig.require && !sig.trusted?.length) {
       throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
     }
+  }
+  const ctx = policy.context;
+  if (ctx !== undefined) {
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) throw new Error(`${POLICY_FILE}: context must be an object`);
+    if (ctx.files !== undefined && !(Array.isArray(ctx.files) && ctx.files.length > 0 && ctx.files.every((g) => typeof g === "string" && g.length > 0))) {
+      throw new Error(`${POLICY_FILE}: context.files must be a list of globs`);
+    }
+    if (ctx.approvers !== undefined && !(Array.isArray(ctx.approvers) && ctx.approvers.length > 0 && ctx.approvers.every((k) => ["agent", "tool", "human"].includes(k)))) {
+      throw new Error(`${POLICY_FILE}: context.approvers must list agent, tool or human`);
+    }
+    if (ctx.approverSigners !== undefined && !(Array.isArray(ctx.approverSigners) && ctx.approverSigners.length > 0 && ctx.approverSigners.every((x) => typeof x === "string" && x.length > 0))) {
+      throw new Error(`${POLICY_FILE}: context.approverSigners must be a list of signer identities`);
+    }
+    if (ctx.requireRecorded !== undefined && typeof ctx.requireRecorded !== "boolean") throw new Error(`${POLICY_FILE}: context.requireRecorded must be true or false`);
+    if (ctx.hiddenContent !== undefined && !["refuse", "allow"].includes(ctx.hiddenContent)) throw new Error(`${POLICY_FILE}: context.hiddenContent must be "refuse" or "allow"`);
   }
   const req = policy.require;
   if (req !== undefined && !(Array.isArray(req) && req.every((r) => typeof r === "string" && r.length > 0))) {
@@ -554,9 +741,11 @@ export function resolvePolicy(opts: { root?: string; from?: string; candidates?:
     if (found) return fromRef(ref);
   }
   if (candidates.length) {
-    return fromWorkingTree([
+    const r = fromWorkingTree([
       `The base branch (${candidates.join(" or ")}) isn't in this checkout, so the policy was read from this branch, which a pull request can edit. Fetch the base, or pass --policy-from <ref>.`,
     ]);
+    r.info.baseMissing = candidates.join(" or ");
+    return r;
   }
   return fromWorkingTree();
 }
@@ -567,7 +756,7 @@ export function checkBase(base: string, what: string = "coverage base"): void {
     throw new Error(`${what} must be a git ref such as origin/main, not "${base}"`);
   }
   if (base === "HEAD" || base === "@") {
-    if (what !== "coverage base") throw new Error(`${what} "${base}" is this branch itself. Use the branch you merge into, such as origin/main`);
+    if (what !== "coverage base" && what !== "agent context base") throw new Error(`${what} "${base}" is this branch itself. Use the branch you merge into, such as origin/main`);
     throw new Error(`${what} "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
   }
 }
@@ -581,17 +770,17 @@ function git(root: string, args: string[]): string {
  * staged, unstaged and untracked. Deleted files are left out (there is nothing
  * left to attest). Paths are relative to `root`.
  */
-export function changedFiles(root: string, base: string): string[] {
-  checkBase(base);
+export function changedFiles(root: string, base: string, what: string = "coverage"): string[] {
+  checkBase(base, `${what} base`);
   // Coverage must see the whole repository. Run from a subfolder, git would only report that folder.
   let top: string;
   try {
     top = git(root, ["rev-parse", "--show-toplevel"]).trim();
   } catch {
-    throw new Error("coverage: this folder is not inside a git repository");
+    throw new Error(`${what}: this folder is not inside a git repository`);
   }
   if (realpathSync(top) !== realpathSync(root)) {
-    throw new Error(`coverage: run from the repository root (${top}), not a subfolder. From a subfolder it would miss changes elsewhere in the repo.`);
+    throw new Error(`${what}: run from the repository root (${top}), not a subfolder. From a subfolder it would miss changes elsewhere in the repo.`);
   }
   let mergeBase: string;
   try {
@@ -599,7 +788,7 @@ export function changedFiles(root: string, base: string): string[] {
     mergeBase = git(root, ["merge-base", commit, "HEAD"]).trim();
   } catch {
     throw new Error(
-      `coverage: can't find the base "${base}" in this checkout. ` +
+      `${what}: can't find the base "${base}" in this checkout. ` +
         `In GitHub Actions, use actions/checkout with fetch-depth: 0.`,
     );
   }
@@ -637,8 +826,15 @@ export function verifyAttestations(opts: {
   signatures?: Map<string, SignatureCheck>;
   /** Where the policy came from, recorded on the report. */
   policySource?: PolicySource;
+  /** Base ref for agent context checks. Default: the ref the policy was read from, else the coverage base. */
+  base?: string;
 }): VerifyReport {
-  const report = verifyCore(opts);
+  const base = opts.base ?? (opts.policySource?.source === "base" ? opts.policySource.ref : undefined);
+  const policy = opts.policy === undefined ? loadPolicy(resolve(opts.root ?? process.cwd())) : opts.policy;
+  if (policy?.context && opts.policySource?.baseMissing && !base) {
+    throw new Error(`agent context: the base branch (${opts.policySource.baseMissing}) isn't in this checkout, so changes to agent instructions can't be checked. Fetch it, or use actions/checkout with fetch-depth: 0.`);
+  }
+  const report = verifyCore({ ...opts, policy, base });
   return opts.policySource ? { ...report, policy: opts.policySource } : report;
 }
 
@@ -648,10 +844,18 @@ function verifyCore(opts: {
   require?: string[];
   policy?: Policy | null;
   signatures?: Map<string, SignatureCheck>;
+  base?: string;
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
+  const notes: string[] = [];
+  const ctxPolicy = policy?.context;
+  const ctxGlobs = ctxPolicy?.files ?? DEFAULT_CONTEXT_FILES;
+  const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
+  const contextProblems = ctxPolicy ? scanContext(root, ctxGlobs).problems : [];
+  /** Who gave a current, passing verdict on each path: its claimed kind, and its signer when the signature is valid. */
+  const coveredBy = new Map<string, { kind: AttesterKind; signedBy?: string }[]>();
   const required = [...new Set([...(opts.require ?? []), ...(policy?.require ?? [])])];
   const results: CheckResult[] = [];
   const covered = new Set<string>();
@@ -711,6 +915,34 @@ function verifyCore(opts: {
         attFailures.push({ ...who, status: "check_failed", message: `${att.by}: "${c.command}" ${how} ${c.exitCode} when the verdict was recorded` });
       }
     }
+    // The verdict was given under agent instructions that have since changed, or it didn't record them.
+    if (currentContext && (att.kind ?? "agent") !== "human") {
+      if (att.context) {
+        const recorded = new Map(att.context.map((c) => [c.path, c.sha256]));
+        for (const [path, sha] of recorded) {
+          const now = currentContext.get(path);
+          if (now !== sha) {
+            attFailures.push({
+              ...who,
+              subject: path,
+              status: "context_changed",
+              expected: sha,
+              ...(now ? { actual: now } : {}),
+              message: now
+                ? `${att.by} gave "${att.verdict}" under a different version of ${path}. The agent's instructions changed after the verdict.`
+                : `${att.by} gave "${att.verdict}" under ${path}, which is no longer there. The agent's instructions changed after the verdict.`,
+            });
+          }
+        }
+        for (const path of currentContext.keys()) {
+          if (!recorded.has(path)) {
+            attFailures.push({ ...who, subject: path, status: "context_changed", message: `${path} was added to the agent's context after ${att.by} gave "${att.verdict}"` });
+          }
+        }
+      } else if (ctxPolicy?.requireRecorded !== false) {
+        attFailures.push({ ...who, status: "context_changed", message: `${att.by}: verdict records no agent context, so there's no telling what the agent was told. Attest again with a current Slipmark (it records context when the policy has a context section).` });
+      }
+    }
     const allow = policy?.models?.allow;
     if (allow && !(att.agent?.model && allow.includes(att.agent.model))) {
       const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
@@ -759,6 +991,8 @@ function verifyCore(opts: {
         continue;
       }
       covered.add(relKey);
+      if (!coveredBy.has(relKey)) coveredBy.set(relKey, []);
+      coveredBy.get(relKey)!.push({ kind: att.kind ?? "agent", ...(sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {}) });
       results.push({ ...base, status: "verified", ...(signer ? { signer } : {}), message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
@@ -797,15 +1031,58 @@ function verifyCore(opts: {
     }
   }
 
+  // Links in agent context point instructions somewhere the gate doesn't watch. Always refused.
+  for (const p of contextProblems) results.push({ status: "context_unapproved", subject: p.path, message: p.message });
+
+  // A change to the agent's context needs approval from someone it allows (by default a human verdict),
+  // and must not hide text from the people reviewing it.
+  if (ctxPolicy) {
+    const ctxBase = opts.base ?? policy?.coverage?.base;
+    if (!ctxBase) {
+      notes.push("Agent context changes weren't checked: no base branch is known. In a pull request the Action supplies it; locally, pass --policy-from <ref> or --coverage diff --base <ref>.");
+    } else {
+      const approvers = ctxPolicy.approvers ?? ["human"];
+      const signers = ctxPolicy.approverSigners;
+      const approved = (path: string) =>
+        (coveredBy.get(path) ?? []).some(
+          (v) => approvers.includes(v.kind) && (!signers || (v.signedBy !== undefined && signers.some((p) => identityMatches(v.signedBy!, p)))),
+        );
+      const problemPaths = new Set(contextProblems.map((p) => p.path));
+      for (const f of changedFiles(root, ctxBase, "agent context")) {
+        const path = toPosix(f);
+        if (!currentContext!.has(path) || problemPaths.has(path)) continue;
+        if (!approved(path)) {
+          const who = `${approvers.join(" or ")}${signers ? `, signed by ${signers.join(" or ")}` : ""}`;
+          results.push({
+            status: "context_unapproved",
+            subject: path,
+            message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${who}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`,
+          });
+        }
+        if (ctxPolicy.hiddenContent !== "allow") {
+          const findings = scanHiddenContent(path, readFileSync(join(root, path), "utf8"));
+          if (findings.length) {
+            const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            results.push({
+              status: "hidden_content",
+              subject: path,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or set context.hiddenContent to "allow" on the base branch.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
   const failures = results.filter((r) => r.status !== "verified");
   const checked = results.length;
   // An empty run is not a pass: a gate with nothing to check proves nothing.
   const ok = failures.length === 0 && checked > 0;
   if (checked === 0) {
     const empty: CheckResult = { status: "unattested", message: `no attestations found in ${toPosix(relative(root, dir)) || "."}` };
-    return { ok: false, checked: 0, results: [empty], failures: [empty] };
+    return { ok: false, checked: 0, results: [empty], failures: [empty], ...(notes.length ? { notes } : {}) };
   }
-  return { ok, checked, results, failures };
+  return { ok, checked, results, failures, ...(notes.length ? { notes } : {}) };
 }
 
 /**

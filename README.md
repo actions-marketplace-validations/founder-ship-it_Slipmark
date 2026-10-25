@@ -220,6 +220,21 @@ slipmark verify --coverage diff --base origin/main
 
 Details in [docs/attestation.md](./docs/attestation.md#version-2-fields).
 
+### Agent context
+
+Your reviewer passed the code. But who wrote the reviewer's instructions?
+The coding-agent attacks of 2026 changed AGENTS.md, skills and MCP configs and
+left the reviewed code alone. Add `"context": {}` to `.slipmark/policy.json`
+and Slipmark binds each verdict to the agent's instructions too:
+
+- a verdict given under instructions that later changed stops counting
+- a change to AGENTS.md, CLAUDE.md, a skill or an MCP config needs an approver's verdict (pair it with CODEOWNERS, or require signed approvals)
+- changed instructions with hidden text (invisible characters, HTML comments, images) are refused
+- context files that link outside the watched set are refused
+
+The policy is read from the base branch, so a pull request can't switch this
+off. What it doesn't cover yet is listed in the docs. Details in [docs/attestation.md](./docs/attestation.md#agent-context).
+
 ### Signed verdicts
 
 **Prove who gave the verdict, not just what it was about** (on `main`,
