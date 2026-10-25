@@ -2196,7 +2196,9 @@ var BLANK_RUN = 20;
 var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 var MAX_SCAN = 512 * 1024;
 var MAX_FINDINGS = 50;
-var isMarkdownish = (path) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
+var OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg)$/i;
+var SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
+var isMarkdownish = (path) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 var normLabel = (l) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
 function linkDefinitions(input2) {
   const body = input2.replace(/\r\n?/g, "\n");
@@ -2242,6 +2244,9 @@ function linkDefinitions(input2) {
 var lineOf = (text, index) => text.slice(0, index).split("\n").length;
 function scanHiddenContent(path, text) {
   const out2 = [];
+  if (OTHER_MARKUP.test(path)) {
+    return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
+  }
   if (text.length > MAX_SCAN) {
     return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
   }
@@ -2836,7 +2841,7 @@ function verifyCore(opts) {
             results.push({
               status: "hidden_content",
               subject: path,
-              message: `${path} is agent context with text a reviewer may not see (${list2}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or, if you've read it and accept it: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --subject ${path}`
+              message: `${path} is agent context with text a reviewer may not see (${list2}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). ${signers ? `Remove it, or, if you've read it and accept it, sign an acknowledgement: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --sign --subject ${path}` : `Remove it. To accept content like this after reading it, set context.approverSigners on the base branch and sign an acknowledgement, or set context.hiddenContent to "allow".`}`
             });
           }
         }

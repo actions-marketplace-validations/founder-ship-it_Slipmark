@@ -332,8 +332,12 @@ That's enough to start. With it:
    or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
    images, inline or reference-style; and a file that isn't valid UTF-8, or is
    over 512 KB, which can't be checked. Comments, HTML, links and images are
-   only looked for in prose files (Markdown, MDX, text, no extension), because
-   GitHub shows JSON and YAML as raw text. Any finding is
+   looked for in every context file except code and data (`.json`, `.yaml`,
+   `.toml`, `.py`, `.ts`, `.sh` and similar), which GitHub shows as raw text.
+   Any other extension, or none, is treated as Markdown. Other markup GitHub
+   renders, with comments of its own (`.rst`, `.adoc`, `.org`, `.textile`,
+   `.svg` and similar), is refused in agent context: write instructions in
+   Markdown. Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
    not have seen it, unless an approver signs to say they have:
    ```bash

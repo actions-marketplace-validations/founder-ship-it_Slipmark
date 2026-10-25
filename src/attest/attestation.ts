@@ -1095,7 +1095,7 @@ function verifyCore(opts: {
             results.push({
               status: "hidden_content",
               subject: path,
-              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or, if you've read it and accept it: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --subject ${path}`,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). ${signers ? `Remove it, or, if you've read it and accept it, sign an acknowledgement: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --sign --subject ${path}` : `Remove it. To accept content like this after reading it, set context.approverSigners on the base branch and sign an acknowledgement, or set context.hiddenContent to "allow".`}`,
             });
           }
         }

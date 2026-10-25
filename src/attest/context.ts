@@ -85,7 +85,16 @@ export const MAX_SCAN = 512 * 1024;
 /** Enough to refuse and to show the reader; stops a file of a million comments costing a million line counts. */
 const MAX_FINDINGS = 50;
 
-const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
+/**
+ * How GitHub shows a file, by extension. Markup it renders other than Markdown
+ * (reStructuredText, AsciiDoc, Org, ...) has its own hidden comments that
+ * Slipmark doesn't parse, so in agent context it's refused. Data and code are
+ * shown as raw text, where comments are visible. Anything else, including no
+ * extension and every Markdown variant, is treated as Markdown: the safe side.
+ */
+const OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg)$/i;
+const SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
+const isMarkdownish = (path: string) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 
 /** CommonMark matches labels by Unicode case fold: [ss] and [SS] are the same label. Upper then lower is close enough in JS. */
 const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
@@ -155,6 +164,9 @@ const lineOf = (text: string, index: number) => text.slice(0, index).split("\n")
  */
 export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
   const out: HiddenFinding[] = [];
+  if (OTHER_MARKUP.test(path)) {
+    return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
+  }
   if (text.length > MAX_SCAN) {
     return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
   }
