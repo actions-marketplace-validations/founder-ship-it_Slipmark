@@ -2154,6 +2154,16 @@ var parser = _Parser.parse;
 var lexer = _Lexer.lex;
 
 // src/attest/context.ts
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// src/attest/markdownSubset.ts
+var CODE_LANGUAGES = new Set(
+  "bash sh shell zsh fish console shellsession text txt plaintext plain output log diff patch json jsonc json5 yaml yml toml ini properties env dotenv csv tsv xml javascript js mjs cjs jsx typescript ts tsx mts cts node python py python3 ruby rb go golang rust rs java kotlin kt swift objc objective-c c h cpp c++ cc hpp cxx csharp cs c# fsharp fs php perl pl lua r dart scala elixir ex exs erlang erl haskell hs ocaml ml clojure clj elm nim zig crystal julia sql psql pgsql mysql sqlite graphql gql proto protobuf prisma html htm css scss sass less vue svelte astro dockerfile docker makefile make cmake gradle groovy hcl terraform tf nix powershell ps1 pwsh bat cmd batch vim viml nginx apache markdown md mdx regex gitignore gitattributes editorconfig http".split(/\s+/)
+);
+var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
+
+// src/attest/context.ts
 var DEFAULT_CONTEXT_FILES = [
   // Instruction files, at any depth
   "**/AGENTS.md",
@@ -2193,7 +2203,6 @@ var DEFAULT_CONTEXT_FILES = [
 var INVISIBLE = /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 var BLANK_RUN = 20;
-var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 var MAX_SCAN = 512 * 1024;
 var SCAN_BUDGET_MS = 3e3;
 var MAX_FINDINGS = 50;
@@ -2243,6 +2252,16 @@ function linkDefinitions(input2) {
   });
 }
 var lineOf = (text, index) => text.slice(0, index).split("\n").length;
+function checkMarkdownSubset(path, text, budgetMs = SCAN_BUDGET_MS) {
+  const worker = fileURLToPath(new URL("./markdownWorker.js", import.meta.url));
+  const r = spawnSync(process.execPath, [worker], { input: JSON.stringify({ text }), encoding: "utf8", timeout: budgetMs, maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    const why = r.error?.code === "ETIMEDOUT" || r.signal ? "too complex to check in time" : "couldn't be checked";
+    return { findings: [{ path, line: 1, kind: "not_plain_markdown", detail: why }], visible: "" };
+  }
+  const out2 = JSON.parse(r.stdout);
+  return { findings: out2.unsupported.map((u) => ({ path, line: u.line, kind: "not_plain_markdown", detail: u.detail })), visible: out2.visible };
+}
 function scanHiddenContent(path, text) {
   const out2 = [];
   const started = Date.now();
@@ -2339,11 +2358,20 @@ function scanHiddenContent(path, text) {
       out2.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
     }
   }
+  if (isMarkdownish(path) && out2.length < MAX_FINDINGS) {
+    const left = SCAN_BUDGET_MS - (Date.now() - started);
+    if (left <= 0) return tooSlow();
+    const seen = new Set(out2.map((f) => f.line));
+    for (const f of checkMarkdownSubset(path, body, left).findings) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (!seen.has(f.line)) out2.push(f);
+    }
+  }
   return out2.sort((a, b) => a.line - b.line);
 }
 
 // src/attest/attestation.ts
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync as spawnSync2 } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 var ATTESTATION_SCHEMA = "slipmark/attestation@1";

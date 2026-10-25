@@ -17,6 +17,9 @@
 
 /** Where coding agents read their instructions and tools from. Override with `context.files` in the policy. */
 import { Lexer, Tokenizer } from "marked";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { ALLOWED_COMMENTS } from "./markdownSubset.js";
 
 export const DEFAULT_CONTEXT_FILES = [
   // Instruction files, at any depth
@@ -58,7 +61,7 @@ export const DEFAULT_CONTEXT_FILES = [
 export interface HiddenFinding {
   path: string;
   line: number;
-  kind: "invisible_characters" | "html_comment" | "hidden_html" | "markdown_comment" | "blank_padding" | "image_reference";
+  kind: "invisible_characters" | "html_comment" | "hidden_html" | "markdown_comment" | "blank_padding" | "image_reference" | "not_plain_markdown";
   detail: string;
 }
 
@@ -77,8 +80,6 @@ const INVISIBLE =
 const RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 
 const BLANK_RUN = 20;
-/** Comments Slipmark itself writes (`slipmark init` fences its block in AGENTS.md with these). Exact text only. */
-const ALLOWED_COMMENTS = new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 
 /** Changed context files larger than this are refused rather than scanned. */
 export const MAX_SCAN = 512 * 1024;
@@ -155,6 +156,24 @@ export function linkDefinitions(input: string): { label: string; href: string; t
 }
 
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
+
+/**
+ * The allow-list check: parse the file as GitHub Markdown and refuse anything
+ * outside the plain subset in markdownSubset.ts. The parser runs in a child
+ * process with a time limit, because some inputs make Markdown parsers slow;
+ * running out of time, or failing to run, refuses the file. Returns the text
+ * the subset displays, for comparing with GitHub's own rendering.
+ */
+export function checkMarkdownSubset(path: string, text: string, budgetMs: number = SCAN_BUDGET_MS): { findings: HiddenFinding[]; visible: string } {
+  const worker = fileURLToPath(new URL("./markdownWorker.js", import.meta.url));
+  const r = spawnSync(process.execPath, [worker], { input: JSON.stringify({ text }), encoding: "utf8", timeout: budgetMs, maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    const why = (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" || r.signal ? "too complex to check in time" : "couldn't be checked";
+    return { findings: [{ path, line: 1, kind: "not_plain_markdown", detail: why }], visible: "" };
+  }
+  const out = JSON.parse(r.stdout) as { unsupported: { line: number; detail: string }[]; visible: string };
+  return { findings: out.unsupported.map((u) => ({ path, line: u.line, kind: "not_plain_markdown" as const, detail: u.detail })), visible: out.visible };
+}
 
 /**
  * Text an agent reads but a person reviewing the change on GitHub may not see.
@@ -283,6 +302,16 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     for (let m = image.exec(body); m; m = image.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
+    }
+  }
+  if (isMarkdownish(path) && out.length < MAX_FINDINGS) {
+    const left = SCAN_BUDGET_MS - (Date.now() - started);
+    if (left <= 0) return tooSlow();
+    // One finding per line: the pattern checks above usually say more precisely what's wrong.
+    const seen = new Set(out.map((f) => f.line));
+    for (const f of checkMarkdownSubset(path, body, left).findings) {
+      if (out.length >= MAX_FINDINGS) break;
+      if (!seen.has(f.line)) out.push(f);
     }
   }
   return out.sort((a, b) => a.line - b.line);
