@@ -96,7 +96,8 @@ function policyFromArgs(args: string[]): { policy: Policy | null; info: PolicySo
       const from = argVal(args, "--policy-from") ?? undefined;
       const candidates: string[] = [];
       if (mode) { const b = argVal(args, "--base"); if (b) candidates.push(b); }
-      if (process.env.GITHUB_BASE_REF) candidates.push(`origin/${process.env.GITHUB_BASE_REF}`);
+      // The full ref name: a tag called origin/main must never stand in for the base branch.
+      if (process.env.GITHUB_BASE_REF) candidates.push(`refs/remotes/origin/${process.env.GITHUB_BASE_REF}`);
       ({ policy, info } = resolvePolicy({ root: process.cwd(), from, candidates }));
     }
   } catch (e) {

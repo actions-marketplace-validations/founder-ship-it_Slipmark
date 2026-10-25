@@ -87,11 +87,11 @@ test("cli: in a GitHub pull request the base branch's policy applies automatical
   assert.equal(r.status, 1, r.stderr);
   const report = JSON.parse(r.stdout);
   assert.equal(report.policy.source, "base");
-  assert.equal(report.policy.ref, "origin/main");
+  assert.equal(report.policy.ref, "refs/remotes/origin/main");
   assert.equal(report.policy.changedOnBranch, true);
   assert.ok(report.failures.some((f: { subject?: string }) => f.subject === "src/auth.ts"));
   const text = cli(root, ["verify"], { GITHUB_BASE_REF: "main" });
-  assert.match(text.stdout, /Policy: from origin\/main \(sha256 [0-9a-f]{12}\)/);
+  assert.match(text.stdout, /Policy: from refs\/remotes\/origin\/main \(sha256 [0-9a-f]{12}\)/);
   assert.match(text.stdout, /takes effect after merge/);
   rmSync(root, { recursive: true, force: true });
 });
@@ -191,5 +191,77 @@ test("cli: a policy with uncommitted edits counts as changed on the branch", () 
   writeFileSync(join(root, POLICY), before.replace("]", ", \"src/other.ts\"]"));
   const report = JSON.parse(cli(root, ["verify", "--json", "--policy-from", "main"]).stdout);
   assert.equal(report.policy.changedOnBranch, true);
+  rmSync(root, { recursive: true, force: true });
+});
+
+// From the independent review of this change.
+
+test("cli: in a pull request, running from a subfolder reads that folder's policy from the base (monorepos keep working)", () => {
+  const { root, git } = setup(null);
+  git("checkout", "-q", "main");
+  mkdirSync(join(root, "pkg/.slipmark"), { recursive: true });
+  writeFileSync(join(root, "pkg/a.ts"), "export const a = 1;\n");
+  writeFileSync(join(root, "pkg/.slipmark/policy.json"), JSON.stringify({ schema: POLICY_SCHEMA, require: ["a.ts"] }));
+  git("add", ".");
+  git("commit", "-qm", "pkg");
+  git("update-ref", "refs/remotes/origin/main", "main");
+  git("checkout", "-q", "-B", "feature");
+  writeFileSync(join(root, "pkg/.slipmark/policy.json"), JSON.stringify({ schema: POLICY_SCHEMA, require: [] }));
+  const pkg = join(root, "pkg");
+  const att = createAttestation({ root: pkg, by: "reviewer", verdict: "pass", subjects: ["a.ts"], now: NOW });
+  writeAttestation(defaultAttestationPath(join(pkg, DIR), att), att);
+  const r = cli(pkg, ["verify", "--json"], { GITHUB_BASE_REF: "main" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.policy.source, "base");
+  assert.equal(report.policy.changedOnBranch, true);
+  // no policy in the subfolder at all: still runs, as in v0.4
+  rmSync(join(root, "pkg/.slipmark/policy.json"));
+  assert.notEqual(cli(pkg, ["verify", "--json"], { GITHUB_BASE_REF: "main" }).status, 2);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("policy-from base: a subfolder run never skips a policy kept at the repository root", () => {
+  const { root } = setup();
+  mkdirSync(join(root, "pkg"));
+  assert.throws(() => resolvePolicy({ root: join(root, "pkg"), from: "main" }), /at the repository root on main/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("cli: a tag named origin/main can't stand in for the base branch", () => {
+  const { root, git } = setup();
+  loosen(root);
+  git("add", ".");
+  git("commit", "-qm", "loosen");
+  git("tag", "origin/main"); // a loosened policy commit, tagged to look like the base
+  const r = cli(root, ["verify", "--json"], { GITHUB_BASE_REF: "main" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(JSON.parse(r.stdout).failures.some((f: { subject?: string }) => f.subject === "src/auth.ts"));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("policy-from base: a policy on the base that is a link is an error, never treated as no policy", () => {
+  const { root, git } = setup(null);
+  git("checkout", "-q", "main");
+  execFileSync("ln", ["-s", "../somewhere.json", join(root, POLICY)]);
+  git("add", ".");
+  git("commit", "-qm", "link");
+  git("checkout", "-q", "-B", "feature");
+  assert.throws(() => resolvePolicy({ root, from: "main" }), /isn't a regular file/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("policy-from base: line endings alone don't count as a policy change", () => {
+  const { root, git } = setup();
+  const text = git("show", `main:${POLICY}`);
+  writeFileSync(join(root, POLICY), text.replace(/\n/g, "\r\n") + (text.includes("\n") ? "" : ""));
+  const { info } = resolvePolicy({ root, from: "main" });
+  assert.equal(info.changedOnBranch, undefined);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("errors name the policy base, not the coverage base", () => {
+  const { root } = setup();
+  assert.throws(() => resolvePolicy({ root, from: "--x" }), /policy base must be a git ref/);
   rmSync(root, { recursive: true, force: true });
 });

@@ -93,7 +93,7 @@ runs:
           # The policy is read from the branch being merged into. A default shallow
           # checkout doesn't have it, so fetch just that branch tip. Never deepen a
           # full clone: only fetch when the base isn't already there.
-          if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF^{commit}" >/dev/null; then
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/$GITHUB_BASE_REF^{commit}" >/dev/null; then
             git fetch --no-tags --depth=1 origin "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF" >/dev/null 2>&1 \
               || echo "::warning title=Slipmark::Couldn't fetch the base branch $GITHUB_BASE_REF. The policy will be read from this branch, which the pull request can edit."
           fi

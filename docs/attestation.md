@@ -243,11 +243,21 @@ coverage off. So when a base is known, the policy is read from there:
 
 1. `--policy-from <ref>` (or the Action's `policy-from` input), if given.
    The ref must be in the checkout, or `verify` exits 2.
-2. Otherwise the coverage base, then the pull request's base branch
-   (`origin/$GITHUB_BASE_REF` in GitHub Actions). The Action fetches the base
-   branch for you when the checkout doesn't have it.
+2. Otherwise the base given with `--coverage diff --base <ref>` on the
+   command line, then the pull request's base branch
+   (`refs/remotes/origin/$GITHUB_BASE_REF` in GitHub Actions, by its full name
+   so a tag can't stand in for it). The Action fetches the base branch for you
+   when the checkout doesn't have it. `coverage.base` inside the policy file is
+   not used to find the policy.
 3. Otherwise (a local run, a push build) the checkout's own policy, as in v0.4.
-   If a base was expected but isn't in the checkout, the report says so.
+   If a base was expected but isn't in the checkout, the report says so and the
+   checkout's policy is used.
+
+Run from a subfolder (a package in a monorepo), `verify` reads that folder's
+`.slipmark/policy.json` from the base, just as it reads it from disk. If the
+folder has none but the repository root does, it exits 2 rather than skip the
+root's rules. A policy file on the base that isn't a regular file (a link, for
+example) is an error, never treated as "no policy".
 
 A branch that changes, adds or deletes the policy gets a notice: the base
 policy is applied, and the change takes effect once it's merged. Every report

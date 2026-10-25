@@ -12,7 +12,9 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   base, or the pull request's base branch in GitHub Actions (the Action
   fetches it). A branch that changes the policy gets a notice and the change
   applies after merge. Local runs with no base behave as before.
-  `--policy-from working-tree` restores the old behaviour.
+  `--policy-from working-tree` restores the old behaviour. Subfolder runs
+  read that folder's policy from the base, as they do from disk. The pull
+  request's base is looked up by its full ref name, so a tag can't pose as it.
 - Every report records the policy that decided it: `policy.source`,
   `policy.ref` and `policy.sha256`, in `--json` output and in Slipmark Cloud.
 

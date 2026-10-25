@@ -436,32 +436,36 @@ export function parsePolicy(text: string, label: string = POLICY_FILE): Policy {
   return policy;
 }
 
-/** The repository root, or an error when `root` is not the top of a git repository. */
-function repoTop(root: string, what: string): void {
-  let top: string;
-  try {
-    top = git(root, ["rev-parse", "--show-toplevel"]).trim();
-  } catch {
-    throw new Error(`${what}: this folder is not inside a git repository`);
-  }
-  if (realpathSync(top) !== realpathSync(root)) {
-    throw new Error(`${what}: run from the repository root (${top}), not a subfolder`);
-  }
-}
-
 /** The policy file's text at `ref`: null when the ref has no policy file. Throws when the ref isn't in this checkout. */
 export function policyTextAt(root: string, ref: string): string | null {
-  checkBase(ref);
-  repoTop(resolve(root), "policy");
+  checkBase(ref, "policy base");
+  // Run from a subfolder (a monorepo package), read that folder's policy at the ref, as loadPolicy does on disk.
+  let prefix: string;
+  try {
+    prefix = git(root, ["rev-parse", "--show-prefix"]).trim();
+  } catch {
+    throw new Error("policy: this folder is not inside a git repository, so the policy can't be read from a branch");
+  }
   let commit: string;
   try {
     commit = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
   } catch {
-    throw new Error(`policy: can't find "${ref}" in this checkout, so the base branch's policy can't be read. In GitHub Actions, the Slipmark Action fetches it for you; otherwise use actions/checkout with fetch-depth: 0.`);
+    throw new Error(`policy: can't find "${ref}" in this checkout, so the base branch's policy can't be read. Fetch it first (git fetch origin <branch>), or use actions/checkout with fetch-depth: 0.`);
   }
-  const spec = `${commit}:${POLICY_FILE}`;
-  const exists = spawnSync("git", ["cat-file", "-e", spec], { cwd: root, stdio: "ignore" }).status === 0;
-  return exists ? git(root, ["show", spec]) : null;
+  // ls-tree, not cat-file -e: "not there" is null, anything odd (a link, a folder, a git error) is an error, never "no policy".
+  const read = (path: string): string | null => {
+    const entry = git(root, ["ls-tree", "-z", "--full-tree", commit, "--", path]).split("\0")[0];
+    if (!entry) return null;
+    const [mode, type, object] = entry.split("\t")[0]!.split(" ");
+    if (type !== "blob" || mode === "120000") throw new Error(`policy: ${path} on ${ref} isn't a regular file, so it can't be trusted as the policy`);
+    return git(root, ["cat-file", "blob", object!]);
+  };
+  const own = read(`${prefix}${POLICY_FILE}`);
+  if (own !== null || !prefix) return own;
+  if (read(POLICY_FILE) !== null) {
+    throw new Error(`${POLICY_FILE} is at the repository root on ${ref}. Run from the root, or pass --no-policy to skip it on purpose.`);
+  }
+  return null;
 }
 
 const sha256Text = (t: string): string => createHash("sha256").update(t).digest("hex");
@@ -496,7 +500,8 @@ export function resolvePolicy(opts: { root?: string; from?: string; candidates?:
     const policy = text === null ? null : parsePolicy(text, `${POLICY_FILE} at ${ref}`);
     const info: PolicySource = { source: "base", ref };
     if (text !== null) info.sha256 = sha256Text(text);
-    if (text !== wtText) {
+    const norm = (t: string | null) => (t === null ? null : t.replace(/\r\n/g, "\n"));
+    if (norm(text) !== norm(wtText)) {
       info.changedOnBranch = true;
       info.notes = [
         text === null
@@ -516,7 +521,7 @@ export function resolvePolicy(opts: { root?: string; from?: string; candidates?:
   for (const ref of candidates) {
     let found = false;
     try {
-      checkBase(ref);
+      checkBase(ref, "policy base");
       found = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, stdio: "ignore" }).status === 0;
     } catch {
       found = false;
@@ -532,12 +537,12 @@ export function resolvePolicy(opts: { root?: string; from?: string; candidates?:
 }
 
 /** A coverage base is a ref, never an option. `--independent` would silently make the merge base HEAD. */
-export function checkBase(base: string): void {
+export function checkBase(base: string, what: string = "coverage base"): void {
   if (!base || base.startsWith("-") || /[\0\s]/.test(base)) {
-    throw new Error(`coverage base must be a git ref such as origin/main, not "${base}"`);
+    throw new Error(`${what} must be a git ref such as origin/main, not "${base}"`);
   }
   if (base === "HEAD" || base === "@") {
-    throw new Error(`coverage base "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
+    throw new Error(`${what} "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
   }
 }
 
