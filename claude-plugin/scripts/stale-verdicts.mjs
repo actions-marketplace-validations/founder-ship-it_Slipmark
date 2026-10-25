@@ -10,8 +10,228 @@ import { join as join2 } from "node:path";
 
 // src/attest/attestation.ts
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+
+// src/attest/signing.ts
+function identityMatches(identity, pattern) {
+  const re = new RegExp(`^${pattern.split("*").map((p) => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
+  return re.test(identity);
+}
+
+// src/attest/context.ts
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// src/attest/markdownSubset.ts
+var CODE_LANGUAGES = new Set(
+  "bash sh shell zsh fish console shellsession text txt plaintext plain output log diff patch json jsonc json5 yaml yml toml ini properties env dotenv csv tsv xml javascript js mjs cjs jsx typescript ts tsx mts cts node python py python3 ruby rb go golang rust rs java kotlin kt swift objc objective-c c h cpp c++ cc hpp cxx csharp cs c# fsharp fs php perl pl lua r dart scala elixir ex exs erlang erl haskell hs ocaml ml clojure clj elm nim zig crystal julia sql psql pgsql mysql sqlite graphql gql proto protobuf prisma html htm css scss sass less vue svelte astro dockerfile docker makefile make cmake gradle groovy hcl terraform tf nix powershell ps1 pwsh bat cmd batch vim viml nginx apache markdown md mdx regex gitignore gitattributes editorconfig http conf config cfg jsonl ndjson erb jinja jinja2 j2 handlebars hbs liquid twig ejs mustache".split(/\s+/)
+);
+var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
+
+// src/attest/context.ts
+var DEFAULT_CONTEXT_FILES = [
+  // Instruction files, at any depth
+  "**/AGENTS.md",
+  "**/AGENTS.override.md",
+  "**/AGENT.md",
+  "**/CLAUDE.md",
+  "**/CLAUDE.local.md",
+  "**/GEMINI.md",
+  "CONVENTIONS.md",
+  // Claude Code: settings, hooks, skills, commands, agents
+  "**/.claude/**",
+  // MCP server configs
+  "**/.mcp.json",
+  ".vscode/mcp.json",
+  ".vscode/settings.json",
+  // Cursor
+  ".cursorrules",
+  ".cursor/**",
+  // GitHub Copilot
+  ".github/copilot-instructions.md",
+  ".github/instructions/**",
+  ".github/prompts/**",
+  ".github/agents/**",
+  ".github/chatmodes/**",
+  // Other agents
+  ".agents/**",
+  ".gemini/**",
+  ".codex/**",
+  ".windsurfrules",
+  ".windsurf/**",
+  ".clinerules",
+  ".clinerules/**",
+  ".roo/**",
+  ".amazonq/rules/**",
+  ".junie/**"
+];
+var INVISIBLE = /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
+var BLANK_RUN = 20;
+var MAX_SCAN = 512 * 1024;
+var SCAN_BUDGET_MS = 3e3;
+var MAX_FINDINGS = 50;
+var OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg|ipynb)$/i;
+var SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
+var isMarkdownish = (path) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
+var lineOf = (text, index) => text.slice(0, index).split("\n").length;
+function checkMarkdownSubset(path, text, budgetMs = SCAN_BUDGET_MS) {
+  const worker = fileURLToPath(new URL("./markdownWorker.js", import.meta.url));
+  const r = spawnSync(process.execPath, [worker], { input: JSON.stringify({ text }), encoding: "utf8", timeout: budgetMs, maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    const why = r.error?.code === "ETIMEDOUT" || r.signal ? "too complex to check in time" : "couldn't be checked";
+    return { findings: [{ path, line: 1, kind: "not_plain_markdown", detail: why }], visible: "" };
+  }
+  const out2 = JSON.parse(r.stdout);
+  return { findings: out2.unsupported.map((u) => ({ path, line: u.line, kind: "not_plain_markdown", detail: u.detail })), visible: out2.visible };
+}
+function maskCode(text) {
+  const lines = text.split("\n");
+  let fence = null;
+  const blank = (l) => l.replace(/[^\r]/g, " ");
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const open = /^ {0,3}(?:>[ \t]?)*(`{3,}|~{3,})/.exec(l);
+    if (fence) {
+      if (open && open[1][0] === fence[0] && open[1].length >= fence.length && /^[ \t>]*[`~]+[ \t]*\r?$/.test(l)) fence = null;
+      lines[i] = blank(l);
+      continue;
+    }
+    if (open) {
+      fence = open[1];
+      lines[i] = blank(l);
+      continue;
+    }
+    lines[i] = l.replace(/(`+)[^`]*?\1/g, (m) => " ".repeat(m.length));
+  }
+  return lines.join("\n");
+}
+function scanHiddenContent(path, text) {
+  const out2 = [];
+  const started = Date.now();
+  const overBudget = () => Date.now() - started > SCAN_BUDGET_MS;
+  const tooSlow = () => [...out2, { path, line: 1, kind: "hidden_html", detail: "too complex to check in time" }];
+  if (OTHER_MARKUP.test(path)) {
+    return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
+  }
+  if (Buffer.byteLength(text, "utf8") > MAX_SCAN) {
+    return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
+  }
+  const body = text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+  const lines = body.split(/\r?\n/);
+  let blankStart = -1;
+  for (let i = 0; i < lines.length && out2.length < MAX_FINDINGS; i++) {
+    const line = lines[i];
+    const found = [...new Set([...line.matchAll(INVISIBLE)].map((m) => `U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`))];
+    if (found.length) {
+      out2.push({ path, line: i + 1, kind: "invisible_characters", detail: `invisible or direction-changing characters ${found.slice(0, 4).join(", ")}${found.length > 4 ? " and more" : ""}` });
+    }
+    if (RENDERS_EMPTY.test(line)) {
+      if (blankStart < 0) blankStart = i;
+    } else {
+      if (blankStart >= 0 && i - blankStart >= BLANK_RUN) {
+        out2.push({ path, line: i + 1, kind: "blank_padding", detail: `${i - blankStart} empty-looking lines before this one push it out of view` });
+      }
+      blankStart = -1;
+    }
+  }
+  if (overBudget()) return tooSlow();
+  if (isMarkdownish(path)) {
+    const comment = /<!--([\s\S]*?)(?:-->|$)/g;
+    for (let m = comment.exec(body); m; m = comment.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (m[0].length === 0) {
+        comment.lastIndex++;
+        continue;
+      }
+      const closed = m[0].endsWith("-->");
+      if (closed && m[1].trim() === "") continue;
+      if (closed && ALLOWED_COMMENTS.has(m[0])) continue;
+      out2.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
+    }
+    const rawHtml = /<\?|<!(?:[A-Za-z]|\[CDATA\[)|<\/?(?![A-Za-z][A-Za-z0-9+.-]{1,31}:|[^\s<>@]+@[^\s<>@]+>)[A-Za-z]/g;
+    const prose = maskCode(body);
+    for (let m = rawHtml.exec(prose); m; m = rawHtml.exec(prose)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML: GitHub hides attributes and some tags, agents read them. Write agent instructions in plain Markdown" });
+    }
+    if (overBudget()) return tooSlow();
+    const flagged = /* @__PURE__ */ new Set();
+    const lf = body.replace(/\r\n?/g, "\n");
+    const looksLikeDef = /\]:/g;
+    for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      const line = lineOf(lf, m.index);
+      if (flagged.has(line)) continue;
+      flagged.add(line);
+      out2.push({
+        path,
+        line,
+        kind: "markdown_comment",
+        detail: `"]:" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code`
+      });
+    }
+    if (overBudget()) return tooSlow();
+    const drawnFence = /(?<![`~])(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
+    for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1].toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
+    }
+    const fenceInfo = /(?<![`~])(?:`{3,}|~{3,})[ \t]*[^\s`~]+[ \t]+\S/g;
+    for (let m = fenceInfo.exec(body); m; m = fenceInfo.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
+    }
+    {
+      const proseLines = body.replace(/\r\n?/g, "\n").split("\n");
+      for (let i = 0; i < proseLines.length && out2.length < MAX_FINDINGS; i++) {
+        if (proseLines[i].includes("$")) {
+          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a $: GitHub may draw it as math, which can show text as blank space. Reword it, or acknowledge it if it's code" });
+        }
+      }
+    }
+    const namedInvisible = /&(?:ZeroWidthSpace|NegativeVeryThinSpace|NegativeThinSpace|NegativeMediumSpace|NegativeThickSpace|zwj|zwnj|shy|lrm|rlm|NoBreak|InvisibleTimes|InvisibleComma|it|ic|af|ApplyFunction|ii|dd|DD|ee|lre|rle|lro|rlo|pdf|nbsp);/g;
+    for (let m = namedInvisible.exec(body); m; m = namedInvisible.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (m[0] === "&nbsp;") continue;
+      out2.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
+    }
+    const entity = /&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));/g;
+    for (let m = entity.exec(body); m; m = entity.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      const cp = m[1] ? parseInt(m[1], 16) : parseInt(m[2], 10);
+      if (cp > 1114111) continue;
+      INVISIBLE.lastIndex = 0;
+      if (INVISIBLE.test(String.fromCodePoint(cp))) {
+        out2.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
+      }
+      INVISIBLE.lastIndex = 0;
+    }
+    const inlineTitle = /\]\([ \t\n]*(?:<[^>\n]*>|[^\s()<]+)[ \t\n]+["'(]/g;
+    for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "link title, shown only on hover: GitHub doesn't render it, agents read it" });
+    }
+    const image = /!\[/g;
+    for (let m = image.exec(body); m; m = image.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
+    }
+  }
+  if (isMarkdownish(path) && out2.length < MAX_FINDINGS) {
+    const left = SCAN_BUDGET_MS - (Date.now() - started);
+    if (left <= 0) return tooSlow();
+    const seen = new Set(out2.map((f) => f.line));
+    for (const f of checkMarkdownSubset(path, body, left).findings) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (!seen.has(f.line)) out2.push(f);
+    }
+  }
+  return out2.sort((a, b) => a.line - b.line);
+}
+
+// src/attest/attestation.ts
+import { execFileSync, spawnSync as spawnSync2 } from "node:child_process";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 var ATTESTATION_SCHEMA = "slipmark/attestation@1";
 var ATTESTATION_SCHEMA_V2 = "slipmark/attestation@2";
@@ -47,6 +267,99 @@ function toPosix(p) {
 function isPassingVerdict(verdict) {
   return PASSING_VERDICTS.includes(verdict);
 }
+function contextMatch(path, globs) {
+  const ignoreCase = !path.includes("/") || path.startsWith(".");
+  return globs.some((g) => (ignoreCase ? new RegExp(globToRegExp(g).source, "i") : globToRegExp(g)).test(path));
+}
+function scanContext(root, globs) {
+  root = resolve(root);
+  let all;
+  try {
+    all = git(root, ["ls-files", "-co", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
+  } catch {
+    all = [];
+    const walk = (rel) => {
+      for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+        const p = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) {
+          if (e.name !== ".git" && e.name !== "node_modules") walk(p);
+        } else all.push(p);
+      }
+    };
+    walk("");
+  }
+  const files = [];
+  const problems = [];
+  const reachesInto = (p) => globs.some((g) => {
+    const fixed = g.split(/[*?]/)[0];
+    return fixed.toLowerCase().startsWith(p.toLowerCase() + "/") || contextMatch(`${p}/x`, globs);
+  });
+  let gitlinks = [];
+  try {
+    gitlinks = git(root, ["ls-files", "-s", "-z"]).split("\0").filter((e) => e.startsWith("160000 ")).map((e) => toPosix(e.slice(e.indexOf("	") + 1)));
+  } catch {
+    gitlinks = [];
+  }
+  for (const g of gitlinks) {
+    if (contextMatch(g, globs) || reachesInto(g)) {
+      problems.push({ path: g, message: `${g} is a submodule. Agent context must be real files in this repository, so every instruction is watched.` });
+    }
+  }
+  const skip = new Set(gitlinks);
+  for (const p of [...new Set(all.map(toPosix))].sort()) {
+    if (p.startsWith(".slipmark/") || skip.has(p)) continue;
+    const abs = join(root, p);
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      continue;
+    }
+    const isContext = contextMatch(p, globs);
+    if (st.isSymbolicLink()) {
+      if (!isContext && !reachesInto(p)) continue;
+      let target = null;
+      try {
+        target = toPosix(relative(realpathSync(root), realpathSync(abs)));
+      } catch {
+        target = null;
+      }
+      const ok = isContext && target !== null && !target.startsWith("..") && !isAbsolute(target) && contextMatch(target, globs) && statSync(abs).isFile();
+      if (ok) files.push(p);
+      else problems.push({ path: p, message: `${p} is a link${target ? ` to ${target}` : ""}. Agent context must be real files in the repo, or links to other context files, so every instruction is watched.` });
+      continue;
+    }
+    if (isContext && st.isFile()) files.push(p);
+  }
+  return { files, problems };
+}
+function contextDigests(root, globs) {
+  root = resolve(root);
+  requireRepoRoot(root, "agent context");
+  const { files, problems } = scanContext(root, globs);
+  const linkHash = (p) => createHash("sha256").update(`link:${(() => {
+    try {
+      return readlinkSync(join(root, p));
+    } catch {
+      return "";
+    }
+  })()}`).digest("hex");
+  return [
+    ...files.map((p) => ({ path: p, sha256: sha256File(join(root, p)) })),
+    ...problems.map((x) => ({ path: x.path, sha256: linkHash(x.path) }))
+  ].sort((a, b) => a.path.localeCompare(b.path));
+}
+function requireRepoRoot(root, what) {
+  let top;
+  try {
+    top = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    return;
+  }
+  if (realpathSync(top) !== realpathSync(root)) {
+    throw new Error(`${what}: run from the repository root (${top}), not a subfolder. Agents in a subfolder still read the root's instructions, so the check covers the whole repository.`);
+  }
+}
 function isSubjectList(v, allowEmpty) {
   return Array.isArray(v) && (allowEmpty || v.length > 0) && v.every(
     (s) => s && typeof s === "object" && typeof s.path === "string" && typeof s.sha256 === "string" && /^[0-9a-f]{64}$/.test(s.sha256)
@@ -66,6 +379,8 @@ function isAttestation(v) {
   if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
   if (a.against !== void 0 && !isSubjectList(a.against, true)) return false;
   if (a.checks !== void 0 && !isCheckList(a.checks)) return false;
+  if (a.context !== void 0 && !isSubjectList(a.context, true)) return false;
+  if (a.acknowledgedHidden !== void 0 && a.acknowledgedHidden !== true) return false;
   if (a.kind !== void 0 && !["agent", "tool", "human"].includes(a.kind)) return false;
   if (a.agent !== void 0) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -108,65 +423,90 @@ function loadPolicy(root) {
     }
     return null;
   }
+  return parsePolicy(readFileSync(file, "utf8"));
+}
+function parsePolicy(text, label = POLICY_FILE) {
+  const POLICY_FILE2 = label;
   let p;
   try {
-    p = JSON.parse(readFileSync(file, "utf8"));
+    p = JSON.parse(text);
   } catch (e) {
-    throw new Error(`${POLICY_FILE} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`${POLICY_FILE2} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
   const policy = p;
   if (!policy || typeof policy !== "object" || Array.isArray(policy) || policy.schema !== POLICY_SCHEMA) {
-    throw new Error(`${POLICY_FILE} must have "schema": "${POLICY_SCHEMA}"`);
+    throw new Error(`${POLICY_FILE2} must have "schema": "${POLICY_SCHEMA}"`);
   }
   const cov = policy.coverage;
   if (cov !== void 0) {
     if (!cov || typeof cov !== "object" || cov.mode !== "diff" || typeof cov.base !== "string" || !cov.base) {
-      throw new Error(`${POLICY_FILE}: coverage needs "mode": "diff" and a "base" ref`);
+      throw new Error(`${POLICY_FILE2}: coverage needs "mode": "diff" and a "base" ref`);
     }
     checkBase(cov.base);
     if (cov.ignore !== void 0 && !(Array.isArray(cov.ignore) && cov.ignore.every((g) => typeof g === "string"))) {
-      throw new Error(`${POLICY_FILE}: coverage.ignore must be a list of globs`);
+      throw new Error(`${POLICY_FILE2}: coverage.ignore must be a list of globs`);
     }
   }
   const models = policy.models;
   if (models !== void 0 && !(models && typeof models === "object" && Array.isArray(models.allow) && models.allow.every((m) => typeof m === "string"))) {
-    throw new Error(`${POLICY_FILE}: models.allow must be a list of model names`);
+    throw new Error(`${POLICY_FILE2}: models.allow must be a list of model names`);
   }
   const sig = policy.signatures;
   if (sig !== void 0) {
-    if (!sig || typeof sig !== "object" || Array.isArray(sig)) throw new Error(`${POLICY_FILE}: signatures must be an object`);
-    if (sig.require !== void 0 && typeof sig.require !== "boolean") throw new Error(`${POLICY_FILE}: signatures.require must be true or false`);
+    if (!sig || typeof sig !== "object" || Array.isArray(sig)) throw new Error(`${POLICY_FILE2}: signatures must be an object`);
+    if (sig.require !== void 0 && typeof sig.require !== "boolean") throw new Error(`${POLICY_FILE2}: signatures.require must be true or false`);
     if (sig.trusted !== void 0 && !(Array.isArray(sig.trusted) && sig.trusted.every((t) => typeof t === "string" && t.length > 0))) {
-      throw new Error(`${POLICY_FILE}: signatures.trusted must be a list of signer identities`);
+      throw new Error(`${POLICY_FILE2}: signatures.trusted must be a list of signer identities`);
     }
-    if (sig.issuer !== void 0 && !(typeof sig.issuer === "string" && /^https:\/\//.test(sig.issuer))) throw new Error(`${POLICY_FILE}: signatures.issuer must be an https URL`);
+    if (sig.issuer !== void 0 && !(typeof sig.issuer === "string" && /^https:\/\//.test(sig.issuer))) throw new Error(`${POLICY_FILE2}: signatures.issuer must be an https URL`);
     if (sig.require && !sig.trusted?.length) {
-      throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
+      throw new Error(`${POLICY_FILE2}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
     }
+  }
+  const ctx = policy.context;
+  if (ctx !== void 0) {
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) throw new Error(`${POLICY_FILE2}: context must be an object`);
+    if (ctx.files !== void 0 && !(Array.isArray(ctx.files) && ctx.files.length > 0 && ctx.files.every((g) => typeof g === "string" && g.length > 0))) {
+      throw new Error(`${POLICY_FILE2}: context.files must be a list of globs`);
+    }
+    if (ctx.approvers !== void 0 && !(Array.isArray(ctx.approvers) && ctx.approvers.length > 0 && ctx.approvers.every((k) => ["agent", "tool", "human"].includes(k)))) {
+      throw new Error(`${POLICY_FILE2}: context.approvers must list agent, tool or human`);
+    }
+    if (ctx.approverSigners !== void 0 && !(Array.isArray(ctx.approverSigners) && ctx.approverSigners.length > 0 && ctx.approverSigners.every((x) => typeof x === "string" && x.length > 0))) {
+      throw new Error(`${POLICY_FILE2}: context.approverSigners must be a list of signer identities`);
+    }
+    if (ctx.requireRecorded !== void 0 && typeof ctx.requireRecorded !== "boolean") throw new Error(`${POLICY_FILE2}: context.requireRecorded must be true or false`);
+    if (ctx.githubRender !== void 0 && !["auto", "require", "off"].includes(ctx.githubRender)) throw new Error(`${POLICY_FILE2}: context.githubRender must be "auto", "require" or "off"`);
+    if (ctx.hiddenContent !== void 0 && !["refuse", "allow"].includes(ctx.hiddenContent)) throw new Error(`${POLICY_FILE2}: context.hiddenContent must be "refuse" or "allow"`);
+  }
+  const req = policy.require;
+  if (req !== void 0 && !(Array.isArray(req) && req.every((r) => typeof r === "string" && r.length > 0))) {
+    throw new Error(`${POLICY_FILE2}: require must be a list of file paths`);
   }
   return policy;
 }
-function checkBase(base) {
+function checkBase(base, what = "coverage base") {
   if (!base || base.startsWith("-") || /[\0\s]/.test(base)) {
-    throw new Error(`coverage base must be a git ref such as origin/main, not "${base}"`);
+    throw new Error(`${what} must be a git ref such as origin/main, not "${base}"`);
   }
   if (base === "HEAD" || base === "@") {
-    throw new Error(`coverage base "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
+    if (what !== "coverage base" && what !== "agent context base") throw new Error(`${what} "${base}" is this branch itself. Use the branch you merge into, such as origin/main`);
+    throw new Error(`${what} "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
   }
 }
 function git(root, args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
-function changedFiles(root, base) {
-  checkBase(base);
+function changedFiles(root, base, what = "coverage") {
+  checkBase(base, `${what} base`);
   let top;
   try {
     top = git(root, ["rev-parse", "--show-toplevel"]).trim();
   } catch {
-    throw new Error("coverage: this folder is not inside a git repository");
+    throw new Error(`${what}: this folder is not inside a git repository`);
   }
   if (realpathSync(top) !== realpathSync(root)) {
-    throw new Error(`coverage: run from the repository root (${top}), not a subfolder. From a subfolder it would miss changes elsewhere in the repo.`);
+    throw new Error(`${what}: run from the repository root (${top}), not a subfolder. From a subfolder it would miss changes elsewhere in the repo.`);
   }
   let mergeBase;
   try {
@@ -174,7 +514,7 @@ function changedFiles(root, base) {
     mergeBase = git(root, ["merge-base", commit, "HEAD"]).trim();
   } catch {
     throw new Error(
-      `coverage: can't find the base "${base}" in this checkout. In GitHub Actions, use actions/checkout with fetch-depth: 0.`
+      `${what}: can't find the base "${base}" in this checkout. In GitHub Actions, use actions/checkout with fetch-depth: 0.`
     );
   }
   const split = (out2) => out2.split("\0").filter(Boolean);
@@ -187,9 +527,25 @@ function listAttestationFiles(dir) {
   return readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => join(dir, f));
 }
 function verifyAttestations(opts) {
+  const base = opts.base ?? (opts.policySource?.source === "base" ? opts.policySource.ref : void 0);
+  const policy = opts.policy === void 0 ? loadPolicy(resolve(opts.root ?? process.cwd())) : opts.policy;
+  if (policy?.context && opts.policySource?.baseMissing && !base) {
+    throw new Error(`agent context: the base branch (${opts.policySource.baseMissing}) isn't in this checkout, so changes to agent instructions can't be checked. Fetch it, or use actions/checkout with fetch-depth: 0.`);
+  }
+  const report = verifyCore({ ...opts, policy, base });
+  return opts.policySource ? { ...report, policy: opts.policySource } : report;
+}
+function verifyCore(opts) {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === void 0 ? loadPolicy(root) : opts.policy;
+  const notes = [...opts.renderNotes ?? []];
+  const ctxPolicy = policy?.context;
+  const ctxGlobs = ctxPolicy?.files ?? DEFAULT_CONTEXT_FILES;
+  const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
+  const contextProblems = ctxPolicy ? scanContext(root, ctxGlobs).problems : [];
+  const coveredBy = /* @__PURE__ */ new Map();
+  const required = [.../* @__PURE__ */ new Set([...opts.require ?? [], ...policy?.require ?? []])];
   const results = [];
   const covered = /* @__PURE__ */ new Set();
   const files = listAttestationFiles(dir);
@@ -239,6 +595,31 @@ function verifyAttestations(opts) {
         attFailures.push({ ...who, status: "check_failed", message: `${att.by}: "${c.command}" ${how} ${c.exitCode} when the verdict was recorded` });
       }
     }
+    if (currentContext && (att.kind ?? "agent") !== "human") {
+      if (att.context) {
+        const recorded = new Map(att.context.map((c) => [c.path, c.sha256]));
+        for (const [path, sha] of recorded) {
+          const now = currentContext.get(path);
+          if (now !== sha) {
+            attFailures.push({
+              ...who,
+              subject: path,
+              status: "context_changed",
+              expected: sha,
+              ...now ? { actual: now } : {},
+              message: now ? `${att.by} gave "${att.verdict}" under a different version of ${path}. The agent's instructions changed after the verdict.` : `${att.by} gave "${att.verdict}" under ${path}, which is no longer there. The agent's instructions changed after the verdict.`
+            });
+          }
+        }
+        for (const path of currentContext.keys()) {
+          if (!recorded.has(path)) {
+            attFailures.push({ ...who, subject: path, status: "context_changed", message: `${path} was added to the agent's context after ${att.by} gave "${att.verdict}"` });
+          }
+        }
+      } else if (ctxPolicy?.requireRecorded !== false) {
+        attFailures.push({ ...who, status: "context_changed", message: `${att.by}: verdict records no agent context, so there's no telling what the agent was told. Attest again with a current Slipmark (it records context when the policy has a context section).` });
+      }
+    }
     const allow = policy?.models?.allow;
     if (allow && !(att.agent?.model && allow.includes(att.agent.model))) {
       const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
@@ -285,11 +666,13 @@ function verifyAttestations(opts) {
         continue;
       }
       covered.add(relKey);
+      if (!coveredBy.has(relKey)) coveredBy.set(relKey, []);
+      coveredBy.get(relKey).push({ kind: att.kind ?? "agent", by: att.by, ackHidden: att.acknowledgedHidden === true, ...sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {} });
       results.push({ ...base, status: "verified", ...signer ? { signer } : {}, message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
   const reported = /* @__PURE__ */ new Set();
-  for (const req of opts.require ?? []) {
+  for (const req of required) {
     const abs = resolveSubject(root, req);
     const key = abs ? toPosix(relative(root, abs)) : req;
     if (!abs || !covered.has(key)) {
@@ -318,14 +701,72 @@ function verifyAttestations(opts) {
       results.push({ status: "uncovered", subject: path, message: `${path} changed since ${cov.base} and no passing, current verdict covers it` });
     }
   }
+  for (const p of contextProblems) results.push({ status: "context_unapproved", subject: p.path, message: p.message });
+  if (ctxPolicy) {
+    const ctxBase = opts.base ?? policy?.coverage?.base;
+    if (!ctxBase) {
+      notes.push("Agent context changes weren't checked: no base branch is known. In a pull request the Action supplies it; locally, pass --policy-from <ref> or --coverage diff --base <ref>.");
+    } else {
+      const approvers = ctxPolicy.approvers ?? ["human"];
+      const signers = ctxPolicy.approverSigners;
+      const approvals = (path) => (coveredBy.get(path) ?? []).filter(
+        (v) => approvers.includes(v.kind) && (!signers || v.signedBy !== void 0 && signers.some((p) => identityMatches(v.signedBy, p)))
+      );
+      const approved = (path) => approvals(path).length > 0;
+      const problemPaths = new Set(contextProblems.map((p) => p.path));
+      const scanStarted = Date.now();
+      for (const f of changedFiles(root, ctxBase, "agent context")) {
+        const path = toPosix(f);
+        if (!currentContext.has(path) || problemPaths.has(path)) continue;
+        if (!approved(path)) {
+          const who = `${approvers.join(" or ")}${signers ? `, signed by ${signers.join(" or ")}` : ""}`;
+          results.push({
+            status: "context_unapproved",
+            subject: path,
+            message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${who}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`
+          });
+        }
+        if (ctxPolicy.hiddenContent !== "allow" && Date.now() - scanStarted > 6e4) {
+          results.push({ status: "hidden_content", subject: path, message: `${path} wasn't checked: the agent context checks ran out of time (a minute in all). Split the change, or simplify these files.` });
+        } else if (ctxPolicy.hiddenContent !== "allow") {
+          let text;
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));
+          } catch {
+            text = null;
+          }
+          const findings = [
+            ...text === null ? [{ path, line: 1, kind: "invisible_characters", detail: "not valid UTF-8, so its text can't be checked" }] : scanHiddenContent(path, text),
+            ...opts.renderFindings?.get(path) ?? []
+          ];
+          if (findings.length) {
+            const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            const ack = signers ? approvals(path).find((v) => v.ackHidden) : void 0;
+            if (!signers && approvals(path).some((v) => v.ackHidden)) {
+              notes.push(`${path}: an acknowledgement of hidden content was recorded but doesn't count: set context.approverSigners so acknowledgements must be signed`);
+            }
+            if (ack) {
+              notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
+              continue;
+            }
+            results.push({
+              status: "hidden_content",
+              subject: path,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). ${signers ? `Remove it, or, if you've read it and accept it, sign an acknowledgement: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --sign --subject ${path}` : `Remove it. To accept content like this after reading it, set context.approverSigners on the base branch and sign an acknowledgement, or set context.hiddenContent to "allow".`}`
+            });
+          }
+        }
+      }
+    }
+  }
   const failures = results.filter((r) => r.status !== "verified");
   const checked = results.length;
   const ok = failures.length === 0 && checked > 0;
   if (checked === 0) {
     const empty = { status: "unattested", message: `no attestations found in ${toPosix(relative(root, dir)) || "."}` };
-    return { ok: false, checked: 0, results: [empty], failures: [empty] };
+    return { ok: false, checked: 0, results: [empty], failures: [empty], ...notes.length ? { notes } : {} };
   }
-  return { ok, checked, results, failures };
+  return { ok, checked, results, failures, ...notes.length ? { notes } : {} };
 }
 
 // src/plugin/staleVerdicts.ts

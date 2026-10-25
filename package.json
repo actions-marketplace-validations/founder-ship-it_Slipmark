@@ -68,6 +68,7 @@
     "access": "public"
   },
   "dependencies": {
+    "marked": "15.0.12",
     "sigstore": "^3.1.0"
   }
 }

@@ -1,0 +1,22 @@
+{
+  "schema": "slipmark/attestation@2",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-25T18:46:36.098Z",
+  "subjects": [
+    {
+      "path": "src/attest/markdownSubset.ts",
+      "sha256": "fc4aaad988891d8eae0138fa6c87db12cce3946306ee2b31b72998afa77b541a"
+    }
+  ],
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
+    }
+  ],
+  "note": "Allow-list of token types and code languages matches the docs"
+}

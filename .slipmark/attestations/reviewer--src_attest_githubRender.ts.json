@@ -1,0 +1,22 @@
+{
+  "schema": "slipmark/attestation@2",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-25T18:46:36.032Z",
+  "subjects": [
+    {
+      "path": "src/attest/githubRender.ts",
+      "sha256": "f953758e3623c2c72e8f4d874694c3d1436a4a32cbf5a9f0de3766b1b28109ea"
+    }
+  ],
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
+    }
+  ],
+  "note": "Renderer comparison matches the docs: counts per word, href and emoji markers, anchors excluded, fails closed; no quadratic regex"
+}
