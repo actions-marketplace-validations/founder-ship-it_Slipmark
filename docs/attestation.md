@@ -324,27 +324,35 @@ That's enough to start. With it:
      only: headings, paragraphs, lists and task lists, quotes, tables,
      horizontal rules, bold, italic, strikethrough, inline code, line breaks,
      escapes, inline links (`[text](url)`), and code blocks with no language
-     or a programming language. Anything else is refused: raw HTML, images,
-     link and footnote definitions, link titles, diagram and formula blocks,
-     and any construct this list doesn't know, including ones GitHub adds in
-     future. The parser runs in a separate process with a time limit, so a
+     or a programming language and nothing after it. Anything else is
+     refused: raw HTML, images, link and footnote definitions, link titles,
+     diagram blocks, table rows with more cells than the header, and any
+     construct this list doesn't know, including ones GitHub adds in future. The parser runs in a separate process with a time limit, so a
      file built to stall it is refused, not left running.
    - **Pattern checks**, as a second net where parsers can disagree:
-     invisible, direction-changing or text-smuggling Unicode; HTML comments,
-     closed or not; any HTML tag; every `]:` (any link or footnote definition
+     invisible, direction-changing or text-smuggling Unicode, written
+     directly or as an HTML entity such as `&#x200B;`; HTML comments, closed
+     or not; any HTML tag outside code (an angle-bracket link like
+     `<https://...>` is fine); every `]:` (any link or footnote definition
      contains it, however its label is laid out); fences for blocks GitHub
-     draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); in a file with a
-     `$` anywhere, every line with a `%` (formulas hide `%` comments); runs of
-     20 or more lines that render empty; images; and a file that isn't valid
-     UTF-8, or is over 512 KB.
+     draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); text after a
+     code block's language; math on a line (two `$`, `$$` or ``$` ``), and,
+     in a file with a `$` anywhere, every line with a `%`; runs of 20 or more
+     lines that render empty; images; and a file that isn't valid UTF-8, or
+     is over 512 KB.
    - **GitHub's own renderer.** In GitHub Actions, each changed file that
-     passes the allow-list is sent to GitHub's Markdown API, the renderer
-     behind README and pull request views, and every word the allow-list
-     expects to be visible must appear in what GitHub returns. If GitHub ever
-     changes how it renders, this follows, because the answer comes from
-     GitHub. It needs the Action's token (passed by default). Outside Actions
-     it's skipped and the report says so; set `githubRender` to `"require"`
-     to refuse instead, or `"off"` to skip it.
+     passes the allow-list is sent to GitHub's Markdown API in `markdown`
+     mode, the renderer behind file and README views. Every word of the
+     file's own text must appear in what GitHub shows, apart from syntax:
+     link addresses, a code block's language, list numbers and task marks.
+     The words come from the file, not from a parser, so anything a parser
+     drops is still compared. Math counts as not shown, since the browser
+     draws it. If GitHub ever changes how it renders, this follows, because
+     the answer comes from GitHub. It needs the Action's token (passed by
+     default). Inside Actions without a token it refuses; outside Actions it's
+     skipped and the report says so. Set `githubRender` to `"require"` to
+     refuse outside Actions too, or `"off"` to skip it. Each file has 15
+     seconds and all files together a minute; running out refuses.
 
    Code and data files (`.json`, `.yaml`, `.toml`, `.py`, `.ts`, `.sh` and
    similar), which GitHub shows as raw text, get only the Unicode, padding,
@@ -354,8 +362,9 @@ That's enough to start. With it:
    Markdown.
 
    Over-flagging is the safe side, so some harmless lines are refused too: a
-   TypeScript `[key: string]: unknown;` in an example, or "costs $5, 80%
-   coverage". Reword them, or acknowledge them. A finding is refused even with
+   TypeScript `[key: string]: unknown;` in an example, a shell sample with
+   both `$HOME` and `date +%Y`, or "costs $5 or $10". Reword them, or
+   acknowledge them. A finding is refused even with
    an approval, because the approver may not have seen it, unless an approver
    signs to say they have:
    ```bash
@@ -445,6 +454,9 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 - **Instructions inside other submodules.** A submodule at a context path is
   refused, but one elsewhere can carry its own AGENTS.md or `.claude/`, which
   agents load when they work in that folder. Updating it trips no context check.
+- **Math spread over lines, without GitHub's renderer.** Locally, math is
+  caught only when it opens on one line (two `$`, `$$`, ``$` ``); math that
+  runs over a line break is caught by the renderer check in Actions.
 - **Text in a link's address.** An inline link's URL shows only on hover. A
   long or empty-text link (`[](https://...)`) can carry text a reviewer won't
   read.

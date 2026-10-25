@@ -55,7 +55,12 @@ function check(text: string): { unsupported: Finding[]; visible: string } {
       }
       const any = t as Token & { text?: string; lang?: string; title?: string | null; tokens?: Token[]; items?: { tokens?: Token[] }[]; header?: { tokens?: Token[] }[]; rows?: { tokens?: Token[] }[][] };
       if (t.type === "code") {
-        const lang = (any.lang ?? "").trim().split(/\s+/)[0] ?? "";
+        const info = (any.lang ?? "").trim();
+        const lang = info.split(/\s+/)[0] ?? "";
+        if (info !== lang) {
+          report(t, "text after a code block's language, which GitHub doesn't show");
+          continue;
+        }
         if (!isAllowedCodeLanguage(lang)) {
           report(t, `a code block marked "${lang}", which GitHub may draw instead of showing. Use a plain code block or a programming language`);
           continue;
@@ -64,6 +69,16 @@ function check(text: string): { unsupported: Finding[]; visible: string } {
         continue;
       }
       if (t.type === "link" && any.title) report(t, "a link title, which shows only on hover");
+      if (t.type === "table") {
+        // Cells beyond the header's count are dropped by GitHub (and by this parser), so text there is never seen.
+        const width = any.header?.length ?? 0;
+        const rows = (t.raw ?? "").split("\n").filter((l) => l.trim()).slice(2);
+        const cells = (l: string) => l.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).length;
+        if (rows.some((l) => cells(l) > width)) {
+          report(t, "a table row with more cells than the header; GitHub drops the extra cells");
+          continue;
+        }
+      }
       if (t.type === "codespan" || (t.type === "text" && !any.tokens)) visible.push(any.text ?? "");
       if (t.type === "escape") visible.push(any.text ?? "");
       const childInline = inline || ["paragraph", "heading", "text", "strong", "em", "del", "link"].includes(t.type);

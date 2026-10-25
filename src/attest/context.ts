@@ -16,7 +16,6 @@
  */
 
 /** Where coding agents read their instructions and tools from. Override with `context.files` in the policy. */
-import { Lexer, Tokenizer } from "marked";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ALLOWED_COMMENTS } from "./markdownSubset.js";
@@ -99,62 +98,6 @@ const OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|
 const SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
 export const isMarkdownish = (path: string) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 
-/** CommonMark matches labels by Unicode case fold: [ss] and [SS] are the same label. Upper then lower is close enough in JS. */
-const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
-
-/**
- * Every link reference definition in a Markdown document, in order, including
- * repeats of a label. A definition never renders itself, and working out which
- * ones a link displays means copying GitHub's inline parser exactly, which a
- * review showed is a losing game. So in agent context every definition is
- * flagged; inline links ([text](url)) are unaffected.
- *
- * Block-level parsing only (definitions are blocks), with line endings
- * normalised first, as marked's own entry point does. Linear in the file size.
- */
-export function linkDefinitions(input: string): { label: string; href: string; title?: string; duplicate: boolean; commentLike: boolean; line: number; endLine: number }[] {
-  const body = input.replace(/\r\n?/g, "\n");
-  const found: { label: string; href: string; title?: string; raw: string }[] = [];
-  // Record each definition as the parser reads it, through the public Tokenizer option.
-  const tokenizer = new Tokenizer();
-  const def = tokenizer.def.bind(tokenizer);
-  tokenizer.def = (src: string) => {
-    const t = def(src);
-    if (t) found.push({ label: t.tag, href: t.href ?? "", ...(t.title ? { title: t.title } : {}), raw: t.raw });
-    return t;
-  };
-  try {
-    new Lexer({ tokenizer }).blockTokens(body, []);
-  } catch {
-    return [];
-  }
-  let cursor = 0;
-  let line = 1;
-  const lineAt = (raw: string) => {
-    const at = body.indexOf(raw.trimStart().split("\n")[0]!, cursor);
-    if (at < 0) return line;
-    for (let i = cursor; i < at; i++) if (body.charCodeAt(i) === 10) line++;
-    cursor = at;
-    return line;
-  };
-  const seen = new Set<string>();
-  return found.map((f) => {
-    const key = normLabel(f.label);
-    const duplicate = seen.has(key);
-    seen.add(key);
-    const start = lineAt(f.raw);
-    return {
-      label: f.label,
-      href: f.href,
-      ...(f.title ? { title: f.title } : {}),
-      duplicate,
-      line: start,
-      endLine: start + (f.raw.replace(/\n+$/, "").match(/\n/g)?.length ?? 0),
-      commentLike: f.href === "" || f.href.startsWith("#") || f.href === "<>" || f.label.trim().startsWith("//"),
-    };
-  });
-}
-
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
 
 /**
@@ -173,6 +116,34 @@ export function checkMarkdownSubset(path: string, text: string, budgetMs: number
   }
   const out = JSON.parse(r.stdout) as { unsupported: { line: number; detail: string }[]; visible: string };
   return { findings: out.unsupported.map((u) => ({ path, line: u.line, kind: "not_plain_markdown" as const, detail: u.detail })), visible: out.visible };
+}
+
+/**
+ * The text with code blanked out (same length, same line breaks): fenced code
+ * blocks, read line by line, and inline code spans. Used only where code
+ * should be exempt, so a mis-read here makes the check stricter or looser by a
+ * little, never silently off: the allow-list and GitHub's renderer still apply.
+ */
+function maskCode(text: string): string {
+  const lines = text.split("\n");
+  let fence: string | null = null;
+  const blank = (l: string) => l.replace(/[^\r]/g, " ");
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]!;
+    const open = /^ {0,3}(?:>[ \t]?)*(`{3,}|~{3,})/.exec(l);
+    if (fence) {
+      if (open && open[1]![0] === fence[0] && open[1]!.length >= fence.length && /^[ \t>]*[`~]+[ \t]*\r?$/.test(l)) fence = null;
+      lines[i] = blank(l);
+      continue;
+    }
+    if (open) {
+      fence = open[1]!;
+      lines[i] = blank(l);
+      continue;
+    }
+    lines[i] = l.replace(/(`+)[^`]*?\1/g, (m) => " ".repeat(m.length));
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -228,34 +199,19 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     // Raw HTML of any kind: GitHub strips some of it (script, style, declarations), never shows attributes
     // (title, data-*, value), and collapses or hides more. Telling which is which means copying GitHub's
     // sanitiser, so every tag opener is flagged: complete, linear. Agent instructions don't need HTML.
-    const rawHtml = /<\?|<!(?:[A-Za-z]|\[CDATA\[)|<\/?[A-Za-z]/g;
-    for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
+    // Code (fenced blocks and inline spans) is shown as written, so a TypeScript <T> there is fine. Telling code
+    // from prose here uses a simple line-based reading; the allow-list's parser and GitHub's renderer back it up.
+    const rawHtml = /<\?|<!(?:[A-Za-z]|\[CDATA\[)|<\/?(?![A-Za-z][A-Za-z0-9+.-]{1,31}:|[^\s<>@]+@[^\s<>@]+>)[A-Za-z]/g;
+    const prose = maskCode(body);
+    for (let m = rawHtml.exec(prose); m; m = rawHtml.exec(prose)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML: GitHub hides attributes and some tags, agents read them. Write agent instructions in plain Markdown" });
     }
     if (overBudget()) return tooSlow();
-    // Link reference definitions render as nothing, and text can hide in the label, the address or the title.
-    // Every one in a changed context file is flagged; write links inline instead. Found two ways: the parser
-    // (labels across lines, escapes), and a deliberately broad line check for anything that looks like one,
-    // because parsers disagree at the edges (tabs, lazy quote continuation). Over-flagging is the safe side.
     const flagged = new Set<number>();
-    for (const d of linkDefinitions(body)) {
-      if (out.length >= MAX_FINDINGS) break;
-      for (let l = d.line; l <= d.endLine; l++) flagged.add(l);
-      const why = d.label.startsWith("^")
-        ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it"
-        : d.duplicate
-        ? "Markdown link definition repeating a label: it renders as nothing at all"
-        : d.commentLike
-          ? "Markdown link definition used as a comment"
-          : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
-      out.push({ path, line: d.line, kind: "markdown_comment", detail: why });
-    }
-    if (overBudget()) return tooSlow();
     // Every link or footnote definition contains the two characters "]:" (the label's closing bracket, then
     // the colon), however the label is split or wherever it sits. So every "]:" is flagged: a complete
-    // over-approximation, linear, with no guessing about Markdown forms. The parser above only gives the
-    // findings it recognises a better message. False alarms (a TypeScript "[key: string]:" in a code
+    // over-approximation, linear, with no guessing about Markdown forms. False alarms (a TypeScript "[key: string]:" in a code
     // sample) are what --acknowledge-hidden is for.
     const lf = body.replace(/\r\n?/g, "\n");
     const looksLikeDef = /\]:/g;
@@ -280,6 +236,32 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1]!.toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
+    }
+    // Text after a code block's language isn't shown by GitHub. Anything after the language is refused.
+    const fenceInfo = /(?<![`~])(?:`{3,}|~{3,})[ \t]*[^\s`~]+[ \t]+\S/g;
+    for (let m = fenceInfo.exec(body); m; m = fenceInfo.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
+    }
+    // Math: GitHub draws $...$, $$...$$ and $`...`$, and TeX can draw text as blank space. Any line that could open
+    // math (two $ on it, $$, or $`) is flagged. Math spread over lines is caught by GitHub's renderer in Actions.
+    const mathLine = /^[^\n]*(?:\$\$|\$`|\$[^\n]*\$)[^\n]*$/gm;
+    for (let m = mathLine.exec(body); m; m = mathLine.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      if (m[0].length === 0) { mathLine.lastIndex++; continue; }
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "math, which GitHub draws and can show as blank space. Agent instructions don't need it" });
+    }
+    // Invisible characters written as HTML entities (&#x200B;, &#8238;) are just as invisible once rendered.
+    const entity = /&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));/g;
+    for (let m = entity.exec(body); m; m = entity.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      const cp = m[1] ? parseInt(m[1], 16) : parseInt(m[2]!, 10);
+      if (cp > 0x10ffff) continue;
+      INVISIBLE.lastIndex = 0;
+      if (INVISIBLE.test(String.fromCodePoint(cp))) {
+        out.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
+      }
+      INVISIBLE.lastIndex = 0;
     }
     // Math ($...$, $$...$$, across lines or not) hides % comments. Telling math from prose means parsing it, so
     // instead: if the file has a $ anywhere, every line with a % is flagged. Complete, linear, can't miss.

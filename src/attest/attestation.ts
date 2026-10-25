@@ -1177,6 +1177,9 @@ export async function verifyWithSignatures(opts: {
   return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures, policySource: opts.policySource, ...rendered });
 }
 
+/** Most time the renderer check may take in all, across files, before the rest are refused. */
+const RENDER_BUDGET_MS = 60_000;
+
 /** The renderer from the environment: GitHub Actions with SLIPMARK_GITHUB_TOKEN or GITHUB_TOKEN set. */
 function rendererFromEnv(): RenderFn | null {
   const token = process.env.SLIPMARK_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
@@ -1207,11 +1210,13 @@ async function renderCheck(
   }
   if (!changed.length) return {};
   const findings = new Map<string, HiddenFinding[]>();
+  const started = Date.now();
   const render = given === undefined ? rendererFromEnv() : given;
   if (!render) {
-    if (ctx.githubRender === "require") {
+    // Inside GitHub Actions the check is expected to run: without a token it refuses, rather than quietly skipping.
+    if (ctx.githubRender === "require" || (given === undefined && process.env.GITHUB_ACTIONS === "true")) {
       for (const path of changed) {
-        findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "the policy requires GitHub's renderer check, and it couldn't run here (it needs GitHub Actions and a token)" }]);
+        findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "GitHub's renderer check couldn't run: it needs GitHub Actions and a token (the Slipmark Action passes one; set SLIPMARK_GITHUB_TOKEN when running the CLI)" }]);
       }
       return { renderFindings: findings };
     }
@@ -1227,7 +1232,11 @@ async function renderCheck(
     if (text.length > MAX_SCAN) continue; // refused by the scan as too large
     const sub = checkMarkdownSubset(path, text);
     if (sub.findings.length) continue; // refused by the allow-list already
-    const f = await compareWithGitHub(path, text, sub.visible, render);
+    if (Date.now() - started > RENDER_BUDGET_MS) {
+      findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "ran out of time checking against GitHub's renderer" }]);
+      continue;
+    }
+    const f = await compareWithGitHub(path, text, render);
     if (f.length) findings.set(path, f);
   }
   return { renderFindings: findings, renderNotes: [`Checked ${changed.length} changed agent context file(s) against GitHub's renderer.`] };
