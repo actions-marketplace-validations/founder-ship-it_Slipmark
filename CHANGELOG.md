@@ -4,7 +4,23 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Security
+- **The policy is read from the base branch** (thanks Kent Bodrov). Before,
+  `verify` read `.slipmark/policy.json` from the pull request's own checkout,
+  so a PR could loosen the rules it was judged by, for example by dropping a
+  required path. Now the policy comes from `--policy-from <ref>`, the coverage
+  base, or the pull request's base branch in GitHub Actions (the Action
+  fetches it). A branch that changes the policy gets a notice and the change
+  applies after merge. Local runs with no base behave as before.
+  `--policy-from working-tree` restores the old behaviour.
+- Every report records the policy that decided it: `policy.source`,
+  `policy.ref` and `policy.sha256`, in `--json` output and in Slipmark Cloud.
+
 ### Added
+- `require` in `.slipmark/policy.json`: required paths kept with the policy,
+  so they are read from the base branch too. The Action's `require` input is
+  in the workflow file, which a pull request can still edit.
+- The Action's `policy-from` input.
 - **Diff coverage.** `slipmark verify --coverage diff --base <ref>` refuses
   any file changed since the base that no current, passing verdict covers
   (new status `uncovered`). `--ignore <glob>` leaves paths out. The Action

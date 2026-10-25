@@ -26,6 +26,10 @@ inputs:
     description: "Globs left out of coverage, one per line, for example 'docs/**'. .slipmark/** is always left out."
     required: false
     default: ""
+  policy-from:
+    description: "Where to read .slipmark/policy.json. Default: the pull request's base branch (fetched for you), so a PR can't loosen the rules it is judged by. A ref such as 'origin/main', or 'working-tree' for the checkout (the v0.4 behaviour)."
+    required: false
+    default: ""
   require-signed:
     description: "Only count verdicts signed (with 'slipmark attest --sign') by one of trusted-signers. Overrides signatures.require in .slipmark/policy.json."
     required: false
@@ -74,6 +78,7 @@ runs:
         DG_REQUIRE: ${{ inputs.require }}
         DG_COV_BASE: ${{ inputs.coverage-base }}
         DG_COV_IGNORE: ${{ inputs.coverage-ignore }}
+        DG_POLICY_FROM: ${{ inputs.policy-from }}
         DG_FAIL: ${{ inputs.fail-on-refusal }}
         DG_REQ_SIGNED: ${{ inputs.require-signed }}
         DG_SIGNERS: ${{ inputs.trusted-signers }}
@@ -82,6 +87,17 @@ runs:
         DG_CLI: ${{ github.action_path }}/dist/src/cli.js
       run: |
         args=(verify --dir "$DG_DIR")
+        if [ -n "$DG_POLICY_FROM" ]; then
+          args+=(--policy-from "$DG_POLICY_FROM")
+        elif [ -n "$GITHUB_BASE_REF" ]; then
+          # The policy is read from the branch being merged into. A default shallow
+          # checkout doesn't have it, so fetch just that branch tip. Never deepen a
+          # full clone: only fetch when the base isn't already there.
+          if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF^{commit}" >/dev/null; then
+            git fetch --no-tags --depth=1 origin "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF" >/dev/null 2>&1 \
+              || echo "::warning title=Slipmark::Couldn't fetch the base branch $GITHUB_BASE_REF. The policy will be read from this branch, which the pull request can edit."
+          fi
+        fi
         while IFS= read -r line; do
           line="${line#"${line%%[![:space:]]*}"}"
           line="${line%"${line##*[![:space:]]}"}"

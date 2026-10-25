@@ -225,11 +225,41 @@ Put the same settings in `.slipmark/policy.json` and every `verify` run
   re-review when you change models. The model is a claimed field, so this
   catches mistakes, not an attester that lies about its model.
 - `signatures`: see [Signed verdicts](#signed-verdicts).
+- `require`: files that must have a current, passing verdict, added to any
+  `--require`. Prefer this to the Action's `require` input: the policy file is
+  read from the base branch, the workflow file isn't (see below).
 
-`--no-policy` ignores the file for one run. The file is read from the folder
-`verify` runs in. If it runs from a subfolder while the repository root has a
-policy file, it exits 2 rather than silently skipping the root's rules. Globs support `**`, `*` and `?`
-and match the whole path from the repository root.
+`--no-policy` ignores the file for one run. If `verify` runs from a subfolder
+while the repository root has a policy file, it exits 2 rather than silently
+skipping the root's rules. Globs support `**`, `*` and `?` and match the whole
+path from the repository root.
+
+### The policy is read from the base branch
+
+A pull request can edit `.slipmark/policy.json`. If the gate read the policy
+from the pull request's own checkout, the PR could loosen the rules it is
+judged by: drop a path from `require`, remove a model restriction, switch
+coverage off. So when a base is known, the policy is read from there:
+
+1. `--policy-from <ref>` (or the Action's `policy-from` input), if given.
+   The ref must be in the checkout, or `verify` exits 2.
+2. Otherwise the coverage base, then the pull request's base branch
+   (`origin/$GITHUB_BASE_REF` in GitHub Actions). The Action fetches the base
+   branch for you when the checkout doesn't have it.
+3. Otherwise (a local run, a push build) the checkout's own policy, as in v0.4.
+   If a base was expected but isn't in the checkout, the report says so.
+
+A branch that changes, adds or deletes the policy gets a notice: the base
+policy is applied, and the change takes effect once it's merged. Every report
+records which policy decided it: `policy.source` (`base`, `working-tree` or
+`none`), `policy.ref`, and `policy.sha256`, the hash of the exact file applied.
+`--policy-from working-tree` restores the old behaviour.
+
+What this doesn't cover: the workflow file itself. GitHub runs a pull request's
+workflow from the pull request, so a PR can change the Action's inputs
+(`require`, `fail-on-refusal`, `policy-from`). Keep required paths in the
+policy file, and protect `.github/workflows/` and `.slipmark/` with CODEOWNERS
+and branch protection. Thanks to Kent Bodrov for reporting this.
 
 ## Signed verdicts
 

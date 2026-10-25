@@ -95,6 +95,29 @@ export interface Policy {
   models?: { allow: string[] };
   /** Signed verdicts: who may sign, and whether unsigned verdicts count. */
   signatures?: SignaturePolicy;
+  /**
+   * Files that must have a current, passing verdict, like `--require`. Kept here
+   * rather than in the workflow so it is read from the base branch, where a pull
+   * request can't loosen it.
+   */
+  require?: string[];
+}
+
+/**
+ * Where this run's policy came from, so a report says which rules made the
+ * decision. A pull request must not be able to loosen the rules it is judged
+ * by, so in CI the policy is read from the base branch, not the checkout.
+ */
+export interface PolicySource {
+  /** `base`: read from `ref`. `working-tree`: the checkout as it is. `none`: no policy applied. */
+  source: "base" | "working-tree" | "none";
+  ref?: string;
+  /** SHA-256 of the policy file that was applied. Absent when there was none. */
+  sha256?: string;
+  /** The checkout's policy differs from the one applied (read from base). It takes effect after merge. */
+  changedOnBranch?: boolean;
+  /** Plain-language notes for the report, for example why the base couldn't be used. */
+  notes?: string[];
 }
 
 export type CheckStatus =
@@ -132,6 +155,8 @@ export interface VerifyReport {
   checked: number;
   results: CheckResult[];
   failures: CheckResult[];
+  /** Which policy file made the decision. */
+  policy?: PolicySource;
 }
 
 export function sha256File(filePath: string): string {
@@ -362,9 +387,15 @@ export function loadPolicy(root: string): Policy | null {
     }
     return null;
   }
+  return parsePolicy(readFileSync(file, "utf8"));
+}
+
+/** Parse and check the text of a policy file. `label` names where it came from in errors. */
+export function parsePolicy(text: string, label: string = POLICY_FILE): Policy {
+  const POLICY_FILE = label; // error messages below name the file as read
   let p: unknown;
   try {
-    p = JSON.parse(readFileSync(file, "utf8"));
+    p = JSON.parse(text);
   } catch (e) {
     throw new Error(`${POLICY_FILE} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -398,7 +429,106 @@ export function loadPolicy(root: string): Policy | null {
       throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
     }
   }
+  const req = policy.require;
+  if (req !== undefined && !(Array.isArray(req) && req.every((r) => typeof r === "string" && r.length > 0))) {
+    throw new Error(`${POLICY_FILE}: require must be a list of file paths`);
+  }
   return policy;
+}
+
+/** The repository root, or an error when `root` is not the top of a git repository. */
+function repoTop(root: string, what: string): void {
+  let top: string;
+  try {
+    top = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    throw new Error(`${what}: this folder is not inside a git repository`);
+  }
+  if (realpathSync(top) !== realpathSync(root)) {
+    throw new Error(`${what}: run from the repository root (${top}), not a subfolder`);
+  }
+}
+
+/** The policy file's text at `ref`: null when the ref has no policy file. Throws when the ref isn't in this checkout. */
+export function policyTextAt(root: string, ref: string): string | null {
+  checkBase(ref);
+  repoTop(resolve(root), "policy");
+  let commit: string;
+  try {
+    commit = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
+  } catch {
+    throw new Error(`policy: can't find "${ref}" in this checkout, so the base branch's policy can't be read. In GitHub Actions, the Slipmark Action fetches it for you; otherwise use actions/checkout with fetch-depth: 0.`);
+  }
+  const spec = `${commit}:${POLICY_FILE}`;
+  const exists = spawnSync("git", ["cat-file", "-e", spec], { cwd: root, stdio: "ignore" }).status === 0;
+  return exists ? git(root, ["show", spec]) : null;
+}
+
+const sha256Text = (t: string): string => createHash("sha256").update(t).digest("hex");
+
+/**
+ * Decide which policy file applies, and record where it came from.
+ *
+ * - `from: "<ref>"`: read the policy from that ref. The ref must be in the checkout.
+ * - `from: "working-tree"`: read it from the checkout (the v0.4 behaviour).
+ * - otherwise the first of `candidates` found in the checkout is used, and when
+ *   there are candidates but none can be found, the checkout is used and the
+ *   report says why.
+ *
+ * A pull request can edit `.slipmark/policy.json`. Read from the base branch,
+ * those edits only take effect after merge, so a PR can't loosen its own rules.
+ */
+export function resolvePolicy(opts: { root?: string; from?: string; candidates?: string[] }): { policy: Policy | null; info: PolicySource } {
+  const root = resolve(opts.root ?? process.cwd());
+  const wtFile = join(root, POLICY_FILE);
+  const wtText = existsSync(wtFile) ? readFileSync(wtFile, "utf8") : null;
+
+  const fromWorkingTree = (notes?: string[]): { policy: Policy | null; info: PolicySource } => {
+    const policy = loadPolicy(root);
+    const info: PolicySource = { source: policy ? "working-tree" : "none" };
+    if (policy && wtText !== null) info.sha256 = sha256Text(wtText);
+    if (notes?.length) info.notes = notes;
+    return { policy, info };
+  };
+
+  const fromRef = (ref: string): { policy: Policy | null; info: PolicySource } => {
+    const text = policyTextAt(root, ref);
+    const policy = text === null ? null : parsePolicy(text, `${POLICY_FILE} at ${ref}`);
+    const info: PolicySource = { source: "base", ref };
+    if (text !== null) info.sha256 = sha256Text(text);
+    if (text !== wtText) {
+      info.changedOnBranch = true;
+      info.notes = [
+        text === null
+          ? `This branch adds ${POLICY_FILE}. It isn't applied until it is merged into ${ref}.`
+          : wtText === null
+            ? `This branch deletes ${POLICY_FILE}. The policy on ${ref} still applies until the deletion is merged.`
+            : `This branch changes ${POLICY_FILE}. The policy on ${ref} was applied; the new one takes effect after merge.`,
+      ];
+    }
+    return { policy, info };
+  };
+
+  if (opts.from === "working-tree") return fromWorkingTree();
+  if (opts.from) return fromRef(opts.from);
+
+  const candidates = (opts.candidates ?? []).filter(Boolean);
+  for (const ref of candidates) {
+    let found = false;
+    try {
+      checkBase(ref);
+      found = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, stdio: "ignore" }).status === 0;
+    } catch {
+      found = false;
+    }
+    if (found) return fromRef(ref);
+  }
+  if (candidates.length) {
+    return fromWorkingTree([
+      `The base branch (${candidates.join(" or ")}) isn't in this checkout, so the policy was read from this branch, which a pull request can edit. Fetch the base, or pass --policy-from <ref>.`,
+    ]);
+  }
+  return fromWorkingTree();
 }
 
 /** A coverage base is a ref, never an option. `--independent` would silently make the merge base HEAD. */
@@ -474,10 +604,24 @@ export function verifyAttestations(opts: {
   policy?: Policy | null;
   /** Signature checks by attestation file (repo-relative), from checkSignatures. Signed attestations without one count as unsigned. */
   signatures?: Map<string, SignatureCheck>;
+  /** Where the policy came from, recorded on the report. */
+  policySource?: PolicySource;
+}): VerifyReport {
+  const report = verifyCore(opts);
+  return opts.policySource ? { ...report, policy: opts.policySource } : report;
+}
+
+function verifyCore(opts: {
+  root?: string;
+  dir?: string;
+  require?: string[];
+  policy?: Policy | null;
+  signatures?: Map<string, SignatureCheck>;
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
+  const required = [...new Set([...(opts.require ?? []), ...(policy?.require ?? [])])];
   const results: CheckResult[] = [];
   const covered = new Set<string>();
   const files = listAttestationFiles(dir);
@@ -589,7 +733,7 @@ export function verifyAttestations(opts: {
   }
 
   const reported = new Set<string>();
-  for (const req of opts.require ?? []) {
+  for (const req of required) {
     const abs = resolveSubject(root, req);
     const key = abs ? toPosix(relative(root, abs)) : req;
     if (!abs || !covered.has(key)) {
@@ -669,10 +813,11 @@ export async function verifyWithSignatures(opts: {
   dir?: string;
   require?: string[];
   policy?: Policy | null;
+  policySource?: PolicySource;
   verify?: Parameters<typeof checkSignature>[2];
 }): Promise<VerifyReport> {
   const root = resolve(opts.root ?? process.cwd());
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
   const signatures = await checkSignatures({ root, dir: opts.dir, policy, verify: opts.verify });
-  return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures });
+  return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures, policySource: opts.policySource });
 }
