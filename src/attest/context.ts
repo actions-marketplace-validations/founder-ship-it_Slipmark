@@ -84,20 +84,21 @@ const MAX_FINDINGS = 50;
 
 const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 
-/** CommonMark matches labels by Unicode case fold: [ß] and [SS] are the same label. Upper then lower is close enough in JS. */
+/** CommonMark matches labels by Unicode case fold: [ss] and [SS] are the same label. Upper then lower is close enough in JS. */
 const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
-
-type BlockToken = { type: string; raw: string; tokens?: BlockToken[]; items?: { tokens?: BlockToken[] }[] };
 
 /**
  * Every link reference definition in a Markdown document, in order, including
- * repeats of a label (Markdown keeps only the first, so later ones render as
- * nothing at all). Block-level parsing only: definitions are blocks, and
- * skipping inline parsing keeps a hostile file from stalling the gate. Every
- * step here is linear in the size of the file.
+ * repeats of a label. A definition never renders itself, and working out which
+ * ones a link displays means copying GitHub's inline parser exactly, which a
+ * review showed is a losing game. So in agent context every definition is
+ * flagged; inline links ([text](url)) are unaffected.
+ *
+ * Block-level parsing only (definitions are blocks), with line endings
+ * normalised first, as marked's own entry point does. Linear in the file size.
  */
-export function linkDefinitions(input: string): { label: string; href: string; title?: string; used: boolean; duplicate: boolean; commentLike: boolean; line: number }[] {
-  const body = input.replace(/\r\n?/g, "\n"); // what marked's own entry point does first
+export function linkDefinitions(input: string): { label: string; href: string; title?: string; duplicate: boolean; commentLike: boolean; line: number }[] {
+  const body = input.replace(/\r\n?/g, "\n");
   const found: { label: string; href: string; title?: string; raw: string }[] = [];
   // Record each definition as the parser reads it, through the public Tokenizer option.
   const tokenizer = new Tokenizer();
@@ -107,37 +108,11 @@ export function linkDefinitions(input: string): { label: string; href: string; t
     if (t) found.push({ label: t.tag, href: t.href ?? "", ...(t.title ? { title: t.title } : {}), raw: t.raw });
     return t;
   };
-  let tokens: BlockToken[];
   try {
-    tokens = new Lexer({ tokenizer }).blockTokens(body, []) as unknown as BlockToken[];
+    new Lexer({ tokenizer }).blockTokens(body, []);
   } catch {
     return [];
   }
-
-  // The text a reader sees links in: every block except definitions and code, with inline code and link
-  // destinations removed. A label written only inside code, or inside a URL, isn't a use.
-  const visible: string[] = [];
-  const walk = (list: BlockToken[] | undefined) => {
-    for (const t of list ?? []) {
-      if (t.type === "def" || t.type === "code" || t.type === "space") continue;
-      if (t.type === "blockquote") walk(t.tokens);
-      else if (t.type === "list") for (const item of t.items ?? []) walk(item.tokens);
-      else visible.push(t.raw);
-    }
-  };
-  walk(tokens);
-  const text = visible
-    .join("\n")
-    .replace(/(`+)[\s\S]*?\1/g, " ")
-    .replace(/\]\((?:[^()\n]|\([^()\n]*\))*\)/g, "]");
-  const used = new Set<string>();
-  const ref = /\[((?:\\.|[^\]\\\n])+)\](?:\[((?:\\.|[^\]\\\n])*)\])?/g;
-  for (let m = ref.exec(text); m; m = ref.exec(text)) {
-    used.add(normLabel(m[2] ? m[2] : m[1]!));
-    if (m[2] !== undefined) used.add(normLabel(m[1]!)); // [label][] (collapsed) uses its text
-  }
-
-  // Line numbers, found by walking forward through the text once.
   let cursor = 0;
   let line = 1;
   const lineAt = (raw: string) => {
@@ -147,21 +122,18 @@ export function linkDefinitions(input: string): { label: string; href: string; t
     cursor = at;
     return line;
   };
-
   const seen = new Set<string>();
   return found.map((f) => {
     const key = normLabel(f.label);
     const duplicate = seen.has(key);
     seen.add(key);
-    const isUsed = used.has(key);
     return {
       label: f.label,
       href: f.href,
       ...(f.title ? { title: f.title } : {}),
-      used: isUsed,
       duplicate,
       line: lineAt(f.raw),
-      commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || (f.href.startsWith("#") && !isUsed),
+      commentLike: f.href === "" || f.href.startsWith("#") || f.href === "<>" || f.label.trim().startsWith("//"),
     };
   });
 }
@@ -216,21 +188,16 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (m[0].length === 0) { rawHtml.lastIndex++; continue; }
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
-    // Link reference definitions render as nothing, wherever they sit (a quote, a list, after an escaped
-    // bracket, with the title on the next line). A Markdown parser finds them all. Flag one used as a comment
-    // ([//]: # (...)), one with a title (shown only as a tooltip), or one no link uses.
+    // Link reference definitions render as nothing, and text can hide in the label, the address or the title.
+    // Every one in a changed context file is flagged; write links inline instead.
     for (const d of linkDefinitions(body)) {
       if (out.length >= MAX_FINDINGS) break;
       const why = d.duplicate
-        ? "Markdown reference defined again: only the first counts, this one renders as nothing"
+        ? "Markdown link definition repeating a label: it renders as nothing at all"
         : d.commentLike
-        ? "Markdown reference used as a comment"
-        : d.title
-          ? "Markdown reference with a title, shown only on hover"
-          : !d.used
-            ? "Markdown reference no link uses"
-            : null;
-      if (why) out.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
+          ? "Markdown link definition used as a comment"
+          : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
+      out.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
     // Inline link titles show only on hover, like a definition's title.
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;

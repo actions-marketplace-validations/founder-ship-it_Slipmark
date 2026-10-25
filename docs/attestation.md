@@ -320,16 +320,16 @@ That's enough to start. With it:
    characters, bidirectional controls, tags, variation selectors, fillers);
    HTML comments, including one never closed; other raw HTML GitHub doesn't
    show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
-   that hide text, found with a Markdown parser wherever they sit (in a quote
-   or a list, with an escaped label, with the title on the next line): one used
-   as a comment like `[//]: # (...)`, one with a title (shown only on hover),
-   one no link uses (a label written only in code doesn't count as a use), or
-   a second definition of a label (only the first counts, so the rest render
-   as nothing); a link title, which shows only on hover; a file that isn't valid UTF-8, or is over
-   512 KB, which can't be checked; runs of 20 or more lines that render empty (blank,
-   `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
-   Comments, HTML and images are only looked for in prose files (Markdown, MDX,
-   text, no extension), because GitHub shows JSON and YAML as raw text. Any finding is
+   (`[label]: url`), found with a Markdown parser wherever they sit (in a
+   quote or a list, with an escaped label, with the title on the next line).
+   Every one is flagged, used or not: a definition never renders, so text can
+   hide in its label, address or title. Write links inline (`[text](url)`)
+   instead. Also flagged: a link title, which shows only on hover; runs of 20
+   or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
+   images, inline or reference-style; and a file that isn't valid UTF-8, or is
+   over 512 KB, which can't be checked. Comments, HTML, links and images are
+   only looked for in prose files (Markdown, MDX, text, no extension), because
+   GitHub shows JSON and YAML as raw text. Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
    not have seen it. Unchanged files aren't scanned, but once a file is
    touched, an old comment in it counts too.

@@ -2207,28 +2207,10 @@ function linkDefinitions(input2) {
     if (t) found.push({ label: t.tag, href: t.href ?? "", ...t.title ? { title: t.title } : {}, raw: t.raw });
     return t;
   };
-  let tokens;
   try {
-    tokens = new _Lexer({ tokenizer }).blockTokens(body, []);
+    new _Lexer({ tokenizer }).blockTokens(body, []);
   } catch {
     return [];
-  }
-  const visible = [];
-  const walk = (list2) => {
-    for (const t of list2 ?? []) {
-      if (t.type === "def" || t.type === "code" || t.type === "space") continue;
-      if (t.type === "blockquote") walk(t.tokens);
-      else if (t.type === "list") for (const item of t.items ?? []) walk(item.tokens);
-      else visible.push(t.raw);
-    }
-  };
-  walk(tokens);
-  const text = visible.join("\n").replace(/(`+)[\s\S]*?\1/g, " ").replace(/\]\((?:[^()\n]|\([^()\n]*\))*\)/g, "]");
-  const used = /* @__PURE__ */ new Set();
-  const ref = /\[((?:\\.|[^\]\\\n])+)\](?:\[((?:\\.|[^\]\\\n])*)\])?/g;
-  for (let m = ref.exec(text); m; m = ref.exec(text)) {
-    used.add(normLabel(m[2] ? m[2] : m[1]));
-    if (m[2] !== void 0) used.add(normLabel(m[1]));
   }
   let cursor = 0;
   let line = 1;
@@ -2244,15 +2226,13 @@ function linkDefinitions(input2) {
     const key = normLabel(f.label);
     const duplicate = seen.has(key);
     seen.add(key);
-    const isUsed = used.has(key);
     return {
       label: f.label,
       href: f.href,
       ...f.title ? { title: f.title } : {},
-      used: isUsed,
       duplicate,
       line: lineAt(f.raw),
-      commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || f.href.startsWith("#") && !isUsed
+      commentLike: f.href === "" || f.href.startsWith("#") || f.href === "<>" || f.label.trim().startsWith("//")
     };
   });
 }
@@ -2303,8 +2283,8 @@ function scanHiddenContent(path, text) {
     }
     for (const d of linkDefinitions(body)) {
       if (out2.length >= MAX_FINDINGS) break;
-      const why = d.duplicate ? "Markdown reference defined again: only the first counts, this one renders as nothing" : d.commentLike ? "Markdown reference used as a comment" : d.title ? "Markdown reference with a title, shown only on hover" : !d.used ? "Markdown reference no link uses" : null;
-      if (why) out2.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
+      const why = d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
+      out2.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
