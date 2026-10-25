@@ -2,11 +2,11 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-23T11:53:15.341Z",
+  "at": "2026-10-25T14:32:08.417Z",
   "subjects": [
     {
       "path": "docs/attestation.md",
-      "sha256": "17b4475988711e06e733f28ae2a825ad45ad4cffe488fea16ed7ae2def917a62"
+      "sha256": "3752b18b9857076c2c1aa90a4ef815e94aa53ebd8642bc0706a48b55ce414a63"
     }
   ],
   "agent": {
@@ -15,8 +15,8 @@
   "against": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "275919d891e92cb75a4743c789aff20afea823a1c0b364a30e6417644bff41cc"
+      "sha256": "7556949190a721b8dc2ce0249664dde2302e88b5d7128b7ae5d56a3f2c48451b"
     }
   ],
-  "note": "Docs match the code: new statuses, exit 2 when Sigstore is unreachable and signatures are required, policy signatures block, signed-verdicts section incl. pull_request ref warning and public Rekor note"
+  "note": "Docs match code: policy-from order and fallback note, policy.source/ref/sha256, require in policy, subfolder and link rules, new exit-2 cases, signatures.issuer, HEAD message."
 }

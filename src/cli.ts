@@ -19,7 +19,7 @@ import { runPack, repairArtifactsFor, repairIndexDoc, agentRulesDoc, claudeCodeC
 import type { GitContext, Pack } from "./types.js";
 import type { VerificationRun } from "./engine/runner.js";
 import type { DashboardData } from "./dashboard/data.js";
-import { createAttestation, writeAttestation, defaultAttestationPath, verifyWithSignatures, loadPolicy, POLICY_SCHEMA, type Policy, type VerifyReport, type AttesterKind } from "./attest/attestation.js";
+import { createAttestation, writeAttestation, defaultAttestationPath, verifyWithSignatures, resolvePolicy, POLICY_SCHEMA, type Policy, type PolicySource, type VerifyReport, type AttesterKind } from "./attest/attestation.js";
 import { signAttestation } from "./attest/signing.js";
 import { existsSync } from "node:fs";
 import { planInit, applyInit } from "./init.js";
@@ -60,6 +60,9 @@ verify
   [--dir .slipmark/attestations] [--require <file>...] [--json]
   [--coverage diff --base <ref> [--ignore <glob>...]]  every changed file needs a verdict
   [--require-signed --trusted-signer <identity>...]  only count verdicts signed by these
+  [--policy-from <ref|working-tree>]  where to read .slipmark/policy.json. Default: the
+                             coverage base or the pull request's base branch when known,
+                             so a branch can't loosen its own rules; else this checkout
   [--no-policy]              ignore .slipmark/policy.json
   Exit 0: every verdict matches the files as they are now. Exit 1: refused.
   Exit 2: could not run (bad input, or the coverage base is missing).
@@ -78,14 +81,28 @@ Docs: https://github.com/founder-ship-it/Slipmark
  * The policy for this run: `.slipmark/policy.json` (unless --no-policy), with
  * `--coverage diff --base <ref> [--ignore <glob>...]` overriding its coverage.
  */
-function policyFromArgs(args: string[]): Policy | null {
+function policyFromArgs(args: string[]): { policy: Policy | null; info: PolicySource } {
   let policy: Policy | null;
+  let info: PolicySource;
+  const mode = argVal(args, "--coverage");
   try {
-    policy = args.includes("--no-policy") ? null : loadPolicy(process.cwd());
+    if (args.includes("--no-policy")) {
+      policy = null;
+      info = { source: "none", notes: ["--no-policy: .slipmark/policy.json was skipped"] };
+    } else {
+      // In a pull request the policy comes from the branch being merged into, so the
+      // PR can't loosen its own rules. Base candidates: --policy-from, then the
+      // coverage base, then the pull request's base branch in GitHub Actions.
+      const from = argVal(args, "--policy-from") ?? undefined;
+      const candidates: string[] = [];
+      if (mode) { const b = argVal(args, "--base"); if (b) candidates.push(b); }
+      // The full ref name: a tag called origin/main must never stand in for the base branch.
+      if (process.env.GITHUB_BASE_REF) candidates.push(`refs/remotes/origin/${process.env.GITHUB_BASE_REF}`);
+      ({ policy, info } = resolvePolicy({ root: process.cwd(), from, candidates }));
+    }
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));
   }
-  const mode = argVal(args, "--coverage");
   if (mode) {
     if (mode !== "diff") fail(`--coverage only supports "diff", not ${mode}`);
     const base = argVal(args, "--base");
@@ -102,13 +119,14 @@ function policyFromArgs(args: string[]): Policy | null {
     if (trusted.length) sig.trusted = trusted;
     policy = { ...(policy ?? { schema: POLICY_SCHEMA }), signatures: sig };
   }
-  return policy;
+  return { policy, info: info! };
 }
 
 /** The gate, signatures included, with input problems (bad policy, missing base, Sigstore unreachable when required) reported as exit 2. */
 async function runVerify(args: string[]): Promise<VerifyReport> {
   try {
-    return await verifyWithSignatures({ dir: argVal(args, "--dir") ?? undefined, require: argVals(args, "--require"), policy: policyFromArgs(args) });
+    const { policy, info } = policyFromArgs(args);
+    return await verifyWithSignatures({ dir: argVal(args, "--dir") ?? undefined, require: argVals(args, "--require"), policy, policySource: info });
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));
   }
@@ -331,6 +349,12 @@ async function verifyMain(args: string[]): Promise<void> {
       console.log(`      attested: ${r.expected}`);
       console.log(`      now:      ${r.actual}`);
     }
+  }
+  const p = report.policy;
+  if (p) {
+    const where = p.source === "base" ? `from ${p.ref}` : p.source === "working-tree" ? "from this checkout" : "none";
+    console.log(`\n  Policy: ${where}${p.sha256 ? ` (sha256 ${p.sha256.slice(0, 12)})` : p.source === "base" ? " (no policy file there)" : ""}`);
+    for (const n of p.notes ?? []) console.log(`  ! ${n}`);
   }
   if (report.ok) console.log("\n  Every verdict matches the files as they are now.\n");
   else if (report.checked === 0)

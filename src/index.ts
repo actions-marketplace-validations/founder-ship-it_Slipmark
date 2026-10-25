@@ -46,8 +46,10 @@ export {
   defaultAttestationPath,
   verifyAttestations,
   sha256File,
+  resolvePolicy,
+  parsePolicy,
 } from "./attest/attestation.js";
-export type { Attestation, AttestedSubject, Verdict, CheckResult, CheckStatus, VerifyReport } from "./attest/attestation.js";
+export type { Attestation, AttestedSubject, Verdict, CheckResult, CheckStatus, VerifyReport, Policy, PolicySource } from "./attest/attestation.js";
 export { planInit, applyInit, agentBlock, workflowYaml } from "./init.js";
 export { uploadRun, getOidcToken, collectAttestations, summaryMarkdown, DEFAULT_CLOUD_URL } from "./cloud/upload.js";
 export type { UploadResult } from "./cloud/upload.js";
