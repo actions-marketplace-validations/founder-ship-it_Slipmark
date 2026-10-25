@@ -318,19 +318,22 @@ That's enough to start. With it:
    scanned, the whole file, for text a reviewer on GitHub may not see:
    invisible, direction-changing or text-smuggling Unicode (zero-width
    characters, bidirectional controls, tags, variation selectors, fillers);
-   HTML comments, including one never closed; Markdown references used as
-   comments (`[//]: # (...)`); runs of 20 or more lines that render empty
-   (blank, `&nbsp;`, `<br>`); and images, inline or reference-style. Comments
-   and images are only looked for in prose files (Markdown, text, no
-   extension), because GitHub shows JSON and YAML as raw text. Any finding is
+   HTML comments, including one never closed; other raw HTML GitHub doesn't
+   show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
+   that hide text (used as a comment like `[//]: # (...)`, carrying a title, or
+   never used by a link); runs of 20 or more lines that render empty (blank,
+   `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
+   Comments, HTML and images are only looked for in prose files (Markdown, MDX,
+   text, no extension), because GitHub shows JSON and YAML as raw text. Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
    not have seen it. Unchanged files aren't scanned, but once a file is
    touched, an old comment in it counts too.
-5. **Links are refused.** A context path that is a link is refused as
-   `context_unapproved`, on every run, unless it points at another context file
-   in the repo (`CLAUDE.md -> AGENTS.md` is fine; its content is watched
-   through the target). A link to anything else, or a linked folder such as
-   `.claude -> tools/cfg`, would put instructions where the gate doesn't look.
+5. **Links and submodules are refused.** A context path that is a link is
+   refused as `context_unapproved`, on every run, unless it points at another
+   context file in the repo (`CLAUDE.md -> AGENTS.md` is fine; its content is
+   watched through the target). A link to anything else, a linked folder such
+   as `.claude -> tools/cfg`, or a git submodule at a context path would put
+   instructions where the gate doesn't look.
 
 ### Who can approve
 
@@ -352,7 +355,11 @@ The base branch is the approved context: what's merged has been through this
 gate. Since the policy itself is [read from the base](#the-policy-is-read-from-the-base-branch),
 a pull request can't switch these checks off. Checks 3 and 4 compare against
 the base, so use `actions/checkout` with `fetch-depth: 0`. In a pull request
-whose base isn't in the checkout, `verify` exits 2 rather than skip them.
+whose base isn't in the checkout, `verify` exits 2 rather than skip them, as
+long as the policy it could read has a `context` section. If the base can't be
+fetched, the policy comes from the pull request itself (see
+[above](#the-policy-is-read-from-the-base-branch)), which could drop the
+section; the Action fetches the base to avoid that, and warns if it can't.
 With no base expected at all (a local run), they are skipped and the report
 says so.
 
@@ -362,7 +369,7 @@ from a subfolder, `attest` and `verify` exit 2.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `files` | the list below | Globs for agent context files, matched ignoring case |
+| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context |
 | `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
 | `approverSigners` | none | If set, an approval must also be signed by one of these identities |
 | `requireRecorded` | `true` | Verdicts must record their context |

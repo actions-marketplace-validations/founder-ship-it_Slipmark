@@ -327,9 +327,15 @@ export function createAttestation(opts: {
   return att;
 }
 
-/** Case-insensitive glob test: agents and macOS/Windows checkouts treat claude.md and CLAUDE.md alike. */
+/**
+ * Glob test for agent context. At the repository root and inside dot-folders
+ * (.claude, .cursor, ...) case is ignored: agents on macOS and Windows open
+ * claude.md as CLAUDE.md. Deeper in the tree it isn't, so ordinary docs such as
+ * docs/providers/claude.md don't count as agent instructions.
+ */
 function contextMatch(path: string, globs: string[]): boolean {
-  return globs.some((g) => new RegExp(globToRegExp(g).source, "i").test(path));
+  const ignoreCase = !path.includes("/") || path.startsWith(".");
+  return globs.some((g) => (ignoreCase ? new RegExp(globToRegExp(g).source, "i") : globToRegExp(g)).test(path));
 }
 
 /** A link (or anything that isn't a regular file) where agent context would be. */
@@ -373,8 +379,24 @@ export function scanContext(root: string, globs: string[]): { files: string[]; p
       const fixed = g.split(/[*?]/)[0]!; // the literal start of the glob, like ".claude/" or ".github/instructions/"
       return fixed.toLowerCase().startsWith(p.toLowerCase() + "/") || contextMatch(`${p}/x`, globs);
     });
+  // Submodules (gitlinks): their content is another repository the gate can't hash. At a context path, refused like a link.
+  let gitlinks: string[] = [];
+  try {
+    gitlinks = git(root, ["ls-files", "-s", "-z"])
+      .split("\0")
+      .filter((e) => e.startsWith("160000 "))
+      .map((e) => toPosix(e.slice(e.indexOf("\t") + 1)));
+  } catch {
+    gitlinks = [];
+  }
+  for (const g of gitlinks) {
+    if (contextMatch(g, globs) || reachesInto(g)) {
+      problems.push({ path: g, message: `${g} is a submodule. Agent context must be real files in this repository, so every instruction is watched.` });
+    }
+  }
+  const skip = new Set(gitlinks);
   for (const p of [...new Set(all.map(toPosix))].sort()) {
-    if (p.startsWith(".slipmark/")) continue;
+    if (p.startsWith(".slipmark/") || skip.has(p)) continue;
     const abs = join(root, p);
     let st;
     try {

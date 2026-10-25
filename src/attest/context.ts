@@ -54,7 +54,7 @@ export const DEFAULT_CONTEXT_FILES = [
 export interface HiddenFinding {
   path: string;
   line: number;
-  kind: "invisible_characters" | "html_comment" | "markdown_comment" | "blank_padding" | "image_reference";
+  kind: "invisible_characters" | "html_comment" | "hidden_html" | "markdown_comment" | "blank_padding" | "image_reference";
   detail: string;
 }
 
@@ -67,14 +67,14 @@ export interface HiddenFinding {
  * Written as escapes so this file never contains what it looks for.
  */
 const INVISIBLE =
-  /[\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+  /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 /** A line that renders as nothing: whitespace, invisible characters, &nbsp; or <br>. */
-const RENDERS_EMPTY = /^(?:\s|&nbsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
+const RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 
 const BLANK_RUN = 20;
 
-const isMarkdownish = (path: string) => /\.(md|mdc|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
+const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
 
@@ -115,10 +115,32 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (closed && m[1]!.trim() === "") continue;
       out.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
-    // Link reference definitions used as comments: [//]: # (text), [x]: # "text"
-    const refComment = /^ {0,3}\[[^\]]*\]:\s*(?:#|<>)(?:\s|$)/gm;
-    for (let m = refComment.exec(body); m; m = refComment.exec(body)) {
-      out.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "Markdown reference used as a comment: GitHub doesn't render it" });
+    // Raw HTML GitHub strips or doesn't show: processing instructions, declarations, CDATA, script and style.
+    const rawHtml = /<\?[\s\S]*?(?:\?>|$)|<![A-Za-z][^>]*>|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
+    for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
+      if (m[0].length === 0) { rawHtml.lastIndex++; continue; }
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
+    }
+    // Link reference definitions render as nothing. Text can hide in one used as a comment ([//]: # (...)),
+    // in its title ([x]: https://... "hidden text"), or in one no link ever uses. Flag all of these.
+    const refDef = /^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>]*>|\S+)?[ \t]*("[^"]*"|'[^']*'|\([^)]*\))?[ \t]*(\S.*)?$/gm;
+    const withoutDefs = body.replace(refDef, "");
+    const used = (label: string) => {
+      const l = label.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      // [text][label], [label][], or the shortcut [label] not followed by ( or [
+      return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[])`, "i").test(withoutDefs);
+    };
+    for (let m = refDef.exec(body); m; m = refDef.exec(body)) {
+      const [, label, dest, title, trailing] = m;
+      const commentLike = !dest || /^(?:#|<>)/.test(dest) || label!.trim().startsWith("//");
+      const why = commentLike
+        ? "Markdown reference used as a comment"
+        : title || trailing
+          ? "Markdown reference with a title"
+          : !used(label!)
+            ? "Markdown reference no link uses"
+            : null;
+      if (why) out.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
     }
     // Images: inline, reference-style, and HTML.
     const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
