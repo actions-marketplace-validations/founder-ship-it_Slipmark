@@ -23,6 +23,12 @@ jobs:
       - name: Type-check and unit tests
         run: npm test
 
+      - name: "Check: agent context against GitHub's own renderer"
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/github-render-smoke.mjs
+
       # The demos below are built to be refused. Each step passes only when
       # Slipmark catches the planted problem, and fails if it lets it through.
       # In your own project, drop these and let a refusal fail the build.

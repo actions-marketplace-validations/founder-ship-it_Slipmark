@@ -229,7 +229,7 @@ and Slipmark binds each verdict to the agent's instructions too:
 
 - a verdict given under instructions that later changed stops counting
 - a change to AGENTS.md, CLAUDE.md, a skill or an MCP config needs an approver's verdict (pair it with CODEOWNERS, or require signed approvals)
-- changed instructions with hidden text (invisible characters, HTML comments, images) are refused
+- changed instructions must be plain Markdown that GitHub shows in full: an allow-list refuses anything else (HTML, comments, images, diagrams, anything GitHub adds later), and in GitHub Actions each file is checked against GitHub's own renderer
 - context files that link outside the watched set are refused
 
 The policy is read from the base branch, so a pull request can't switch this

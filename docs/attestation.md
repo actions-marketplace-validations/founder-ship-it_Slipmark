@@ -149,7 +149,7 @@ code 1 means the gate refused.
 | `signer_not_trusted` | Signatures are required and this verdict was signed by an identity the policy doesn't trust |
 | `context_changed` | An agent context file (AGENTS.md, a skill, an MCP config) changed after this agent's verdict, or the verdict recorded no context. See [Agent context](#agent-context) |
 | `context_unapproved` | A context file changed since the base and no approver (a human, by default) gave it a passing verdict, or a context path is a link to something that isn't context |
-| `hidden_content` | A changed context file has text a reviewer may not see: invisible characters, HTML comments, blank padding or images |
+| `hidden_content` | A changed context file isn't plain Markdown GitHub shows in full: see check 4 of [Agent context](#agent-context) |
 
 A version 1 attestation is judged on version 1 fields only. Anything else in
 it is ignored.
@@ -314,40 +314,50 @@ That's enough to start. With it:
    ```bash
    slipmark attest --kind human --by paul --verdict pass --subject AGENTS.md
    ```
-4. **Hidden text in changed context is refused.** A changed context file is
-   scanned, the whole file, for text a reviewer on GitHub may not see:
-   invisible, direction-changing or text-smuggling Unicode (zero-width
-   characters, bidirectional controls, tags, variation selectors, fillers);
-   HTML comments, including one never closed; any raw HTML tag, since GitHub
-   strips some tags and never shows attributes such as `title`, `data-*` or
-   `value` (agent instructions don't need HTML; a comparison like `a < b`
-   is fine); Markdown link definitions
-   (`[label]: url`) and footnote definitions (`[^note]: text`), found with a
-   Markdown parser wherever they sit (in a quote or a list, with an escaped
-   label, with the title on the next line). Because parsers disagree at the
-   edges, every `]:` in the file is also flagged: any definition has to contain
-   those two characters, however its label is split. That also fires on code,
-   such as a TypeScript `[key: string]: unknown;` line in an example;
-   acknowledge it (below) if so. Every one is flagged, used or not: a definition never renders, so text can
-   hide in its label, address or title. Write links inline (`[text](url)`)
-   instead. Also flagged: a link title, which shows only on hover; runs of 20
-   or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
-   images, inline or reference-style; and a file that isn't valid UTF-8, or is
-   over 512 KB, which can't be checked. Comments, HTML, links and images are
-   looked for in every context file except code and data (`.json`, `.yaml`,
-   `.toml`, `.py`, `.ts`, `.sh` and similar), which GitHub shows as raw text.
-   Any other extension, or none, is treated as Markdown. Other markup GitHub
-   renders, with comments of its own (`.rst`, `.adoc`, `.org`, `.textile`,
-   `.svg`, notebooks and similar), is refused in agent context: write
-   instructions in Markdown. So are blocks GitHub draws instead of showing,
-   which drop their comments: ```` ```mermaid ````, ```` ```math ````,
-   ```` ```geojson ````, ```` ```topojson ```` and ```` ```stl ```` fences
-   (wherever the fence starts, after a list marker too), and, in a file with a
-   `$` anywhere, every line with a `%` (math hides `%` comments; telling math
-   from prose would mean parsing it, so "costs $5, 80% coverage" is flagged
-   too: reword or acknowledge it). Any finding is
-   refused as `hidden_content`, even with an approval, because the approver may
-   not have seen it, unless an approver signs to say they have:
+4. **Agent instructions must be plain Markdown that GitHub shows in full.**
+   Text a reviewer can't see on GitHub shouldn't reach an agent. Rather than
+   hunt for every way GitHub can hide text, Slipmark allows only what's known
+   to be visible, and refuses the rest as `hidden_content`. A changed context
+   file, the whole file, goes through three layers:
+
+   - **The allow-list.** The file is parsed as GitHub Markdown and may use
+     only: headings, paragraphs, lists and task lists, quotes, tables,
+     horizontal rules, bold, italic, strikethrough, inline code, line breaks,
+     escapes, inline links (`[text](url)`), and code blocks with no language
+     or a programming language. Anything else is refused: raw HTML, images,
+     link and footnote definitions, link titles, diagram and formula blocks,
+     and any construct this list doesn't know, including ones GitHub adds in
+     future. The parser runs in a separate process with a time limit, so a
+     file built to stall it is refused, not left running.
+   - **Pattern checks**, as a second net where parsers can disagree:
+     invisible, direction-changing or text-smuggling Unicode; HTML comments,
+     closed or not; any HTML tag; every `]:` (any link or footnote definition
+     contains it, however its label is laid out); fences for blocks GitHub
+     draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); in a file with a
+     `$` anywhere, every line with a `%` (formulas hide `%` comments); runs of
+     20 or more lines that render empty; images; and a file that isn't valid
+     UTF-8, or is over 512 KB.
+   - **GitHub's own renderer.** In GitHub Actions, each changed file that
+     passes the allow-list is sent to GitHub's Markdown API, the renderer
+     behind README and pull request views, and every word the allow-list
+     expects to be visible must appear in what GitHub returns. If GitHub ever
+     changes how it renders, this follows, because the answer comes from
+     GitHub. It needs the Action's token (passed by default). Outside Actions
+     it's skipped and the report says so; set `githubRender` to `"require"`
+     to refuse instead, or `"off"` to skip it.
+
+   Code and data files (`.json`, `.yaml`, `.toml`, `.py`, `.ts`, `.sh` and
+   similar), which GitHub shows as raw text, get only the Unicode, padding,
+   encoding and size checks. Other markup GitHub renders with comments of its
+   own (`.rst`, `.adoc`, `.org`, `.textile`, `.svg`, notebooks) is refused:
+   write instructions in Markdown. Any other extension, or none, is treated as
+   Markdown.
+
+   Over-flagging is the safe side, so some harmless lines are refused too: a
+   TypeScript `[key: string]: unknown;` in an example, or "costs $5, 80%
+   coverage". Reword them, or acknowledge them. A finding is refused even with
+   an approval, because the approver may not have seen it, unless an approver
+   signs to say they have:
    ```bash
    slipmark attest --kind human --by paul --verdict pass --acknowledge-hidden --subject AGENTS.md --sign
    ```
@@ -355,9 +365,10 @@ That's enough to start. With it:
    acknowledging verdict is signed by one of them. Unsigned, anyone opening a
    pull request could write one, so the report notes it and the gate still
    refuses. An acknowledgement covers the exact bytes of every subject in that
-   verdict, and the report lists what was acknowledged. The comments `slipmark init` writes
-   (`<!-- slipmark:begin -->`, `<!-- slipmark:end -->`) are never flagged. Unchanged files aren't scanned, but once a file is
-   touched, an old comment in it counts too.
+   verdict, and the report lists what was acknowledged. The comments
+   `slipmark init` writes (`<!-- slipmark:begin -->`, `<!-- slipmark:end -->`)
+   are always allowed. Unchanged files aren't checked, but once a file is
+   touched, the whole of it is.
 5. **Links and submodules are refused.** A context path that is a link is
    refused as `context_unapproved`, on every run, unless it points at another
    context file in the repo (`CLAUDE.md -> AGENTS.md` is fine; its content is
@@ -406,7 +417,8 @@ from a subfolder, `attest` and `verify` exit 2.
 | `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
 | `approverSigners` | none | If set, an approval must also be signed by one of these identities |
 | `requireRecorded` | `true` | Verdicts must record their context |
-| `hiddenContent` | `"refuse"` | `"allow"` turns off the hidden-text scan |
+| `hiddenContent` | `"refuse"` | `"allow"` turns off check 4 |
+| `githubRender` | `"auto"` | Check against GitHub's renderer in Actions; `"require"` refuses when it can't run; `"off"` skips it |
 
 Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` and `.claude/` at any depth;

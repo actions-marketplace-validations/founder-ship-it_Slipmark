@@ -97,7 +97,7 @@ const MAX_FINDINGS = 50;
  */
 const OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg|ipynb)$/i;
 const SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
-const isMarkdownish = (path: string) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
+export const isMarkdownish = (path: string) => !SHOWN_RAW.test(path) && !OTHER_MARKUP.test(path);
 
 /** CommonMark matches labels by Unicode case fold: [ss] and [SS] are the same label. Upper then lower is close enough in JS. */
 const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();

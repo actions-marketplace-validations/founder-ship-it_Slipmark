@@ -2617,6 +2617,7 @@ function parsePolicy(text, label = POLICY_FILE) {
       throw new Error(`${POLICY_FILE2}: context.approverSigners must be a list of signer identities`);
     }
     if (ctx.requireRecorded !== void 0 && typeof ctx.requireRecorded !== "boolean") throw new Error(`${POLICY_FILE2}: context.requireRecorded must be true or false`);
+    if (ctx.githubRender !== void 0 && !["auto", "require", "off"].includes(ctx.githubRender)) throw new Error(`${POLICY_FILE2}: context.githubRender must be "auto", "require" or "off"`);
     if (ctx.hiddenContent !== void 0 && !["refuse", "allow"].includes(ctx.hiddenContent)) throw new Error(`${POLICY_FILE2}: context.hiddenContent must be "refuse" or "allow"`);
   }
   const req = policy.require;
@@ -2679,7 +2680,7 @@ function verifyCore(opts) {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === void 0 ? loadPolicy(root) : opts.policy;
-  const notes = [];
+  const notes = [...opts.renderNotes ?? []];
   const ctxPolicy = policy?.context;
   const ctxGlobs = ctxPolicy?.files ?? DEFAULT_CONTEXT_FILES;
   const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
@@ -2872,7 +2873,10 @@ function verifyCore(opts) {
           } catch {
             text = null;
           }
-          const findings = text === null ? [{ path, line: 1, kind: "invisible_characters", detail: "not valid UTF-8, so its text can't be checked" }] : scanHiddenContent(path, text);
+          const findings = [
+            ...text === null ? [{ path, line: 1, kind: "invisible_characters", detail: "not valid UTF-8, so its text can't be checked" }] : scanHiddenContent(path, text),
+            ...opts.renderFindings?.get(path) ?? []
+          ];
           if (findings.length) {
             const list2 = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
             const ack = signers ? approvals(path).find((v) => v.ackHidden) : void 0;

@@ -38,6 +38,10 @@ inputs:
     description: "Signer identities to trust, one per line, for example 'https://github.com/acme/api/.github/workflows/agent-review.yml@refs/heads/main'. '*' matches anything."
     required: false
     default: ""
+  github-token:
+    description: "Token for checking changed agent context files against GitHub's own Markdown renderer (with a context section in the policy). The job's token is enough."
+    required: false
+    default: ${{ github.token }}
   fail-on-refusal:
     description: "Fail the step when the gate refuses. Set to 'false' to report only while you roll Slipmark out."
     required: false
@@ -85,6 +89,7 @@ runs:
         DG_CLOUD: ${{ inputs.cloud }}
         DG_CLOUD_URL: ${{ inputs.cloud-url }}
         DG_CLI: ${{ github.action_path }}/dist/src/cli.js
+        SLIPMARK_GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         args=(verify --dir "$DG_DIR")
         if [ -n "$DG_POLICY_FROM" ]; then
