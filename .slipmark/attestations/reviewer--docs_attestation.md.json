@@ -2,11 +2,11 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-25T14:32:08.417Z",
+  "at": "2026-10-25T18:44:45.761Z",
   "subjects": [
     {
       "path": "docs/attestation.md",
-      "sha256": "3752b18b9857076c2c1aa90a4ef815e94aa53ebd8642bc0706a48b55ce414a63"
+      "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
     }
   ],
   "agent": {
@@ -15,8 +15,8 @@
   "against": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "7556949190a721b8dc2ce0249664dde2302e88b5d7128b7ae5d56a3f2c48451b"
+      "sha256": "4b2c1051aabe473da14bd7958edf5be0348b2b401118d214a29df2cb5d69ddaa"
     }
   ],
-  "note": "Docs match code: policy-from order and fallback note, policy.source/ref/sha256, require in policy, subfolder and link rules, new exit-2 cases, signatures.issuer, HEAD message."
+  "note": "Agent context section matches the code: three layers, the $ rule, renderer limits and uncovered gaps listed"
 }
