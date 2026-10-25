@@ -2194,9 +2194,11 @@ var INVISIBLE = /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\
 var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 var BLANK_RUN = 20;
 var MAX_SCAN = 512 * 1024;
+var MAX_FINDINGS = 50;
 var isMarkdownish = (path) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
-var normLabel = (l) => l.trim().replace(/\s+/g, " ").toLowerCase();
-function linkDefinitions(body) {
+var normLabel = (l) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
+function linkDefinitions(input2) {
+  const body = input2.replace(/\r\n?/g, "\n");
   const found = [];
   const tokenizer = new _Tokenizer();
   const def2 = tokenizer.def.bind(tokenizer);
@@ -2205,34 +2207,51 @@ function linkDefinitions(body) {
     if (t) found.push({ label: t.tag, href: t.href ?? "", ...t.title ? { title: t.title } : {}, raw: t.raw });
     return t;
   };
-  const lexer2 = new _Lexer({ tokenizer });
+  let tokens;
   try {
-    lexer2.blockTokens(body, []);
+    tokens = new _Lexer({ tokenizer }).blockTokens(body, []);
   } catch {
     return [];
   }
-  let rest = body;
-  for (const f of found) rest = rest.replace(f.raw, "");
-  const used = (label) => {
-    const l = normLabel(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
-    return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[:])`, "i").test(rest);
+  const visible = [];
+  const walk = (list2) => {
+    for (const t of list2 ?? []) {
+      if (t.type === "def" || t.type === "code" || t.type === "space") continue;
+      if (t.type === "blockquote") walk(t.tokens);
+      else if (t.type === "list") for (const item of t.items ?? []) walk(item.tokens);
+      else visible.push(t.raw);
+    }
   };
-  const lines = body.split("\n");
-  const seen = /* @__PURE__ */ new Map();
+  walk(tokens);
+  const text = visible.join("\n").replace(/(`+)[\s\S]*?\1/g, " ").replace(/\]\((?:[^()\n]|\([^()\n]*\))*\)/g, "]");
+  const used = /* @__PURE__ */ new Set();
+  const ref = /\[((?:\\.|[^\]\\\n])+)\](?:\[((?:\\.|[^\]\\\n])*)\])?/g;
+  for (let m = ref.exec(text); m; m = ref.exec(text)) {
+    used.add(normLabel(m[2] ? m[2] : m[1]));
+    if (m[2] !== void 0) used.add(normLabel(m[1]));
+  }
+  let cursor = 0;
+  let line = 1;
+  const lineAt = (raw) => {
+    const at = body.indexOf(raw.trimStart().split("\n")[0], cursor);
+    if (at < 0) return line;
+    for (let i = cursor; i < at; i++) if (body.charCodeAt(i) === 10) line++;
+    cursor = at;
+    return line;
+  };
+  const seen = /* @__PURE__ */ new Set();
   return found.map((f) => {
     const key = normLabel(f.label);
-    const count = seen.get(key) ?? 0;
-    seen.set(key, count + 1);
-    const firstLine = f.raw.split("\n").find((l) => l.trim()) ?? f.raw;
-    const at = lines.findIndex((l) => l.includes(firstLine.trim()));
-    const isUsed = used(f.label);
+    const duplicate = seen.has(key);
+    seen.add(key);
+    const isUsed = used.has(key);
     return {
       label: f.label,
       href: f.href,
       ...f.title ? { title: f.title } : {},
       used: isUsed,
-      duplicate: count > 0,
-      line: at >= 0 ? at + 1 : 1,
+      duplicate,
+      line: lineAt(f.raw),
       commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || f.href.startsWith("#") && !isUsed
     };
   });
@@ -2246,7 +2265,7 @@ function scanHiddenContent(path, text) {
   const body = text.charCodeAt(0) === 65279 ? text.slice(1) : text;
   const lines = body.split(/\r?\n/);
   let blankStart = -1;
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 0; i < lines.length && out2.length < MAX_FINDINGS; i++) {
     const line = lines[i];
     const found = [...new Set([...line.matchAll(INVISIBLE)].map((m) => `U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`))];
     if (found.length) {
@@ -2264,6 +2283,7 @@ function scanHiddenContent(path, text) {
   if (isMarkdownish(path)) {
     const comment = /<!--([\s\S]*?)(?:-->|$)/g;
     for (let m = comment.exec(body); m; m = comment.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) {
         comment.lastIndex++;
         continue;
@@ -2272,8 +2292,9 @@ function scanHiddenContent(path, text) {
       if (closed && m[1].trim() === "") continue;
       out2.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
-    const rawHtml = /<\?[\s\S]*?(?:\?>|$)|<![A-Za-z][^>]*>|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
+    const rawHtml = /<\?|<![A-Za-z]|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
     for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) {
         rawHtml.lastIndex++;
         continue;
@@ -2281,11 +2302,18 @@ function scanHiddenContent(path, text) {
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
     for (const d of linkDefinitions(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
       const why = d.duplicate ? "Markdown reference defined again: only the first counts, this one renders as nothing" : d.commentLike ? "Markdown reference used as a comment" : d.title ? "Markdown reference with a title, shown only on hover" : !d.used ? "Markdown reference no link uses" : null;
       if (why) out2.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
     }
+    const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
+    for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      out2.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "link title, shown only on hover: GitHub doesn't render it, agents read it" });
+    }
     const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
     for (let m = image.exec(body); m; m = image.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
     }
   }

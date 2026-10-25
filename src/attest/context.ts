@@ -79,18 +79,25 @@ const RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br
 const BLANK_RUN = 20;
 /** Changed context files larger than this are refused rather than scanned. */
 export const MAX_SCAN = 512 * 1024;
+/** Enough to refuse and to show the reader; stops a file of a million comments costing a million line counts. */
+const MAX_FINDINGS = 50;
 
 const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 
-const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toLowerCase();
+/** CommonMark matches labels by Unicode case fold: [ß] and [SS] are the same label. Upper then lower is close enough in JS. */
+const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toLowerCase();
+
+type BlockToken = { type: string; raw: string; tokens?: BlockToken[]; items?: { tokens?: BlockToken[] }[] };
 
 /**
  * Every link reference definition in a Markdown document, in order, including
- * repeats of a label (the parser keeps only the first, so later ones render as
+ * repeats of a label (Markdown keeps only the first, so later ones render as
  * nothing at all). Block-level parsing only: definitions are blocks, and
- * skipping inline parsing keeps a hostile file from stalling the gate.
+ * skipping inline parsing keeps a hostile file from stalling the gate. Every
+ * step here is linear in the size of the file.
  */
-export function linkDefinitions(body: string): { label: string; href: string; title?: string; used: boolean; duplicate: boolean; commentLike: boolean; line: number }[] {
+export function linkDefinitions(input: string): { label: string; href: string; title?: string; used: boolean; duplicate: boolean; commentLike: boolean; line: number }[] {
+  const body = input.replace(/\r\n?/g, "\n"); // what marked's own entry point does first
   const found: { label: string; href: string; title?: string; raw: string }[] = [];
   // Record each definition as the parser reads it, through the public Tokenizer option.
   const tokenizer = new Tokenizer();
@@ -100,35 +107,60 @@ export function linkDefinitions(body: string): { label: string; href: string; ti
     if (t) found.push({ label: t.tag, href: t.href ?? "", ...(t.title ? { title: t.title } : {}), raw: t.raw });
     return t;
   };
-  const lexer = new Lexer({ tokenizer });
+  let tokens: BlockToken[];
   try {
-    lexer.blockTokens(body, []);
+    tokens = new Lexer({ tokenizer }).blockTokens(body, []) as unknown as BlockToken[];
   } catch {
     return [];
   }
-  // A label is used when the rest of the text has [text][label], [label][] or a shortcut [label].
-  let rest = body;
-  for (const f of found) rest = rest.replace(f.raw, "");
-  const used = (label: string) => {
-    const l = normLabel(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
-    return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[:])`, "i").test(rest);
+
+  // The text a reader sees links in: every block except definitions and code, with inline code and link
+  // destinations removed. A label written only inside code, or inside a URL, isn't a use.
+  const visible: string[] = [];
+  const walk = (list: BlockToken[] | undefined) => {
+    for (const t of list ?? []) {
+      if (t.type === "def" || t.type === "code" || t.type === "space") continue;
+      if (t.type === "blockquote") walk(t.tokens);
+      else if (t.type === "list") for (const item of t.items ?? []) walk(item.tokens);
+      else visible.push(t.raw);
+    }
   };
-  const lines = body.split("\n");
-  const seen = new Map<string, number>();
+  walk(tokens);
+  const text = visible
+    .join("\n")
+    .replace(/(`+)[\s\S]*?\1/g, " ")
+    .replace(/\]\((?:[^()\n]|\([^()\n]*\))*\)/g, "]");
+  const used = new Set<string>();
+  const ref = /\[((?:\\.|[^\]\\\n])+)\](?:\[((?:\\.|[^\]\\\n])*)\])?/g;
+  for (let m = ref.exec(text); m; m = ref.exec(text)) {
+    used.add(normLabel(m[2] ? m[2] : m[1]!));
+    if (m[2] !== undefined) used.add(normLabel(m[1]!)); // [label][] (collapsed) uses its text
+  }
+
+  // Line numbers, found by walking forward through the text once.
+  let cursor = 0;
+  let line = 1;
+  const lineAt = (raw: string) => {
+    const at = body.indexOf(raw.trimStart().split("\n")[0]!, cursor);
+    if (at < 0) return line;
+    for (let i = cursor; i < at; i++) if (body.charCodeAt(i) === 10) line++;
+    cursor = at;
+    return line;
+  };
+
+  const seen = new Set<string>();
   return found.map((f) => {
     const key = normLabel(f.label);
-    const count = seen.get(key) ?? 0;
-    seen.set(key, count + 1);
-    const firstLine = f.raw.split("\n").find((l) => l.trim()) ?? f.raw;
-    const at = lines.findIndex((l) => l.includes(firstLine.trim()));
-    const isUsed = used(f.label);
+    const duplicate = seen.has(key);
+    seen.add(key);
+    const isUsed = used.has(key);
     return {
       label: f.label,
       href: f.href,
       ...(f.title ? { title: f.title } : {}),
       used: isUsed,
-      duplicate: count > 0,
-      line: at >= 0 ? at + 1 : 1,
+      duplicate,
+      line: lineAt(f.raw),
       commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || (f.href.startsWith("#") && !isUsed),
     };
   });
@@ -152,7 +184,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // a leading byte-order mark is harmless
   const lines = body.split(/\r?\n/);
   let blankStart = -1;
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 0; i < lines.length && out.length < MAX_FINDINGS; i++) {
     const line = lines[i]!;
     const found = [...new Set([...line.matchAll(INVISIBLE)].map((m) => `U+${m[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`))];
     if (found.length) {
@@ -171,14 +203,16 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     // HTML comments, including one that is never closed: GitHub hides everything after <!--.
     const comment = /<!--([\s\S]*?)(?:-->|$)/g;
     for (let m = comment.exec(body); m; m = comment.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) { comment.lastIndex++; continue; }
       const closed = m[0].endsWith("-->");
       if (closed && m[1]!.trim() === "") continue;
       out.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
     // Raw HTML GitHub strips or doesn't show: processing instructions, declarations, CDATA, script and style.
-    const rawHtml = /<\?[\s\S]*?(?:\?>|$)|<![A-Za-z][^>]*>|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
+    const rawHtml = /<\?|<![A-Za-z]|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi; // the opening is enough: closed or not, GitHub hides it
     for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) { rawHtml.lastIndex++; continue; }
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
@@ -186,6 +220,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     // bracket, with the title on the next line). A Markdown parser finds them all. Flag one used as a comment
     // ([//]: # (...)), one with a title (shown only as a tooltip), or one no link uses.
     for (const d of linkDefinitions(body)) {
+      if (out.length >= MAX_FINDINGS) break;
       const why = d.duplicate
         ? "Markdown reference defined again: only the first counts, this one renders as nothing"
         : d.commentLike
@@ -197,9 +232,16 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
             : null;
       if (why) out.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
     }
+    // Inline link titles show only on hover, like a definition's title.
+    const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
+    for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      out.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "link title, shown only on hover: GitHub doesn't render it, agents read it" });
+    }
     // Images: inline, reference-style, and HTML.
     const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
     for (let m = image.exec(body); m; m = image.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
     }
   }

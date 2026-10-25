@@ -323,8 +323,9 @@ That's enough to start. With it:
    that hide text, found with a Markdown parser wherever they sit (in a quote
    or a list, with an escaped label, with the title on the next line): one used
    as a comment like `[//]: # (...)`, one with a title (shown only on hover),
-   one no link uses, or a second definition of a label (only the first counts,
-   so the rest render as nothing); a file that isn't valid UTF-8, or is over
+   one no link uses (a label written only in code doesn't count as a use), or
+   a second definition of a label (only the first counts, so the rest render
+   as nothing); a link title, which shows only on hover; a file that isn't valid UTF-8, or is over
    512 KB, which can't be checked; runs of 20 or more lines that render empty (blank,
    `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
    Comments, HTML and images are only looked for in prose files (Markdown, MDX,
