@@ -2227,12 +2227,14 @@ function linkDefinitions(input2) {
     const key = normLabel(f.label);
     const duplicate = seen.has(key);
     seen.add(key);
+    const start = lineAt(f.raw);
     return {
       label: f.label,
       href: f.href,
       ...f.title ? { title: f.title } : {},
       duplicate,
-      line: lineAt(f.raw),
+      line: start,
+      endLine: start + (f.raw.replace(/\n+$/, "").match(/\n/g)?.length ?? 0),
       commentLike: f.href === "" || f.href.startsWith("#") || f.href === "<>" || f.label.trim().startsWith("//")
     };
   });
@@ -2286,12 +2288,12 @@ function scanHiddenContent(path, text) {
     const flagged = /* @__PURE__ */ new Set();
     for (const d of linkDefinitions(body)) {
       if (out2.length >= MAX_FINDINGS) break;
-      flagged.add(d.line);
+      for (let l = d.line; l <= d.endLine; l++) flagged.add(l);
       const why = d.label.startsWith("^") ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out2.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
-    const lf = body.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/^[ \t>*+\-0-9.)]*/, "")).join("\n");
-    const looksLikeDef = /^\[(\^?)(?:\\[\s\S]|[^\]\\\n]|\n(?![ \t]*\n)){1,999}\]:/gm;
+    const lf = body.replace(/\r\n?/g, "\n");
+    const looksLikeDef = /\]:/g;
     for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
       if (out2.length >= MAX_FINDINGS) break;
       const line = lineOf(lf, m.index);
@@ -2301,7 +2303,7 @@ function scanHiddenContent(path, text) {
         path,
         line,
         kind: "markdown_comment",
-        detail: m[1] ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : "looks like a Markdown link definition: renderers may hide it, agents read it. Write the link inline instead"
+        detail: `"]:" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code`
       });
     }
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
@@ -2823,7 +2825,10 @@ function verifyCore(opts) {
           const findings = text === null ? [{ path, line: 1, kind: "invisible_characters", detail: "not valid UTF-8, so its text can't be checked" }] : scanHiddenContent(path, text);
           if (findings.length) {
             const list2 = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
-            const ack = approvals(path).find((v) => v.ackHidden);
+            const ack = signers ? approvals(path).find((v) => v.ackHidden) : void 0;
+            if (!signers && approvals(path).some((v) => v.ackHidden)) {
+              notes.push(`${path}: an acknowledgement of hidden content was recorded but doesn't count: set context.approverSigners so acknowledgements must be signed`);
+            }
             if (ack) {
               notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
               continue;

@@ -1083,7 +1083,11 @@ function verifyCore(opts: {
               : scanHiddenContent(path, text);
           if (findings.length) {
             const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
-            const ack = approvals(path).find((v) => v.ackHidden);
+            // An acknowledgement is only as strong as its signature: unsigned, anyone opening the PR could write one.
+            const ack = signers ? approvals(path).find((v) => v.ackHidden) : undefined;
+            if (!signers && approvals(path).some((v) => v.ackHidden)) {
+              notes.push(`${path}: an acknowledgement of hidden content was recorded but doesn't count: set context.approverSigners so acknowledgements must be signed`);
+            }
             if (ack) {
               notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
               continue;

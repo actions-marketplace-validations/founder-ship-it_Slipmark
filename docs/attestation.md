@@ -322,11 +322,11 @@ That's enough to start. With it:
    show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
    (`[label]: url`) and footnote definitions (`[^note]: text`), found with a
    Markdown parser wherever they sit (in a quote or a list, with an escaped
-   label, with the title on the next line), plus a deliberately broad check for
-   anything that looks like one, because parsers disagree at the edges (tabs,
-   a quote continued without `>`, a label split across lines). The broad check
-   also fires inside code blocks, for example on a TypeScript
-   `[key: string]: unknown;` line; acknowledge it (below) if so. Every one is flagged, used or not: a definition never renders, so text can
+   label, with the title on the next line). Because parsers disagree at the
+   edges, every `]:` in the file is also flagged: any definition has to contain
+   those two characters, however its label is split. That also fires on code,
+   such as a TypeScript `[key: string]: unknown;` line in an example;
+   acknowledge it (below) if so. Every one is flagged, used or not: a definition never renders, so text can
    hide in its label, address or title. Write links inline (`[text](url)`)
    instead. Also flagged: a link title, which shows only on hover; runs of 20
    or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
@@ -335,12 +335,15 @@ That's enough to start. With it:
    only looked for in prose files (Markdown, MDX, text, no extension), because
    GitHub shows JSON and YAML as raw text. Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
-   not have seen it, unless the approver says they have:
+   not have seen it, unless an approver signs to say they have:
    ```bash
-   slipmark attest --kind human --by paul --verdict pass --acknowledge-hidden --subject AGENTS.md
+   slipmark attest --kind human --by paul --verdict pass --acknowledge-hidden --subject AGENTS.md --sign
    ```
-   An acknowledgement covers those exact bytes only, and the report still
-   lists what was acknowledged. The comments `slipmark init` writes
+   Acknowledgements count only when `approverSigners` is set and the
+   acknowledging verdict is signed by one of them. Unsigned, anyone opening a
+   pull request could write one, so the report notes it and the gate still
+   refuses. An acknowledgement covers the exact bytes of every subject in that
+   verdict, and the report lists what was acknowledged. The comments `slipmark init` writes
    (`<!-- slipmark:begin -->`, `<!-- slipmark:end -->`) are never flagged. Unchanged files aren't scanned, but once a file is
    touched, an old comment in it counts too.
 5. **Links and submodules are refused.** A context path that is a link is
@@ -358,7 +361,10 @@ lies. To make approval mean something:
 
 - **Require a person on GitHub.** Add the context paths to CODEOWNERS and
   require code owner review in branch protection. GitHub then enforces a human
-  review of any change to them, whatever Slipmark is told.
+  review of any change to them, whatever Slipmark is told. That covers
+  approval, but not hidden text: the code owner reads the same rendered view
+  the hidden text is built to fool. Hidden content is refused regardless,
+  unless a signed acknowledgement says otherwise.
 - **Require a signed approval.** Set `approverSigners` to the identities whose
   [signed verdicts](#signed-verdicts) may approve, for example a workflow that
   only runs after a code owner approves. An approval then counts only if its
@@ -418,9 +424,10 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 - **Text in a link's address.** An inline link's URL shows only on hover. A
   long or empty-text link (`[](https://...)`) can carry text a reviewer won't
   read.
-- **Acknowledgements are as strong as approvals.** `--acknowledge-hidden` is
-  recorded on a verdict, so, like `kind`, it's a claim unless you require
-  signed approvals with `approverSigners`.
+- **Without signing, hidden content can't be waved through.** Legitimate
+  comments or code samples in a changed context file are refused until they're
+  removed, acknowledged by a signed approver, or `hiddenContent` is set to
+  `"allow"` on the base branch.
 
 ## Signed verdicts
 

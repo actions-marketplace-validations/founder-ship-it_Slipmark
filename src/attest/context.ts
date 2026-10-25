@@ -100,7 +100,7 @@ const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toUpperCase().toL
  * Block-level parsing only (definitions are blocks), with line endings
  * normalised first, as marked's own entry point does. Linear in the file size.
  */
-export function linkDefinitions(input: string): { label: string; href: string; title?: string; duplicate: boolean; commentLike: boolean; line: number }[] {
+export function linkDefinitions(input: string): { label: string; href: string; title?: string; duplicate: boolean; commentLike: boolean; line: number; endLine: number }[] {
   const body = input.replace(/\r\n?/g, "\n");
   const found: { label: string; href: string; title?: string; raw: string }[] = [];
   // Record each definition as the parser reads it, through the public Tokenizer option.
@@ -130,12 +130,14 @@ export function linkDefinitions(input: string): { label: string; href: string; t
     const key = normLabel(f.label);
     const duplicate = seen.has(key);
     seen.add(key);
+    const start = lineAt(f.raw);
     return {
       label: f.label,
       href: f.href,
       ...(f.title ? { title: f.title } : {}),
       duplicate,
-      line: lineAt(f.raw),
+      line: start,
+      endLine: start + (f.raw.replace(/\n+$/, "").match(/\n/g)?.length ?? 0),
       commentLike: f.href === "" || f.href.startsWith("#") || f.href === "<>" || f.label.trim().startsWith("//"),
     };
   });
@@ -199,7 +201,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     const flagged = new Set<number>();
     for (const d of linkDefinitions(body)) {
       if (out.length >= MAX_FINDINGS) break;
-      flagged.add(d.line);
+      for (let l = d.line; l <= d.endLine; l++) flagged.add(l);
       const why = d.label.startsWith("^")
         ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it"
         : d.duplicate
@@ -209,15 +211,13 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
           : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
-    // Container markers (quotes, list bullets) are stripped from every line first, one line for one line, so
-    // a label that starts after "> " and ends on an unquoted next line is still seen. A label may run across
-    // lines but not a blank line, and is at most 999 characters, as in CommonMark; that bound keeps it linear.
-    const lf = body
-      .replace(/\r\n?/g, "\n")
-      .split("\n")
-      .map((l) => l.replace(/^[ \t>*+\-0-9.)]*/, ""))
-      .join("\n");
-    const looksLikeDef = /^\[(\^?)(?:\\[\s\S]|[^\]\\\n]|\n(?![ \t]*\n)){1,999}\]:/gm;
+    // Every link or footnote definition contains the two characters "]:" (the label's closing bracket, then
+    // the colon), however the label is split or wherever it sits. So every "]:" is flagged: a complete
+    // over-approximation, linear, with no guessing about Markdown forms. The parser above only gives the
+    // findings it recognises a better message. False alarms (a TypeScript "[key: string]:" in a code
+    // sample) are what --acknowledge-hidden is for.
+    const lf = body.replace(/\r\n?/g, "\n");
+    const looksLikeDef = /\]:/g;
     for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
       if (out.length >= MAX_FINDINGS) break;
       const line = lineOf(lf, m.index);
@@ -227,9 +227,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
         path,
         line,
         kind: "markdown_comment",
-        detail: m[1]
-          ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it"
-          : "looks like a Markdown link definition: renderers may hide it, agents read it. Write the link inline instead",
+        detail: "\"]:\" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code",
       });
     }
     // Inline link titles show only on hover, like a definition's title.
