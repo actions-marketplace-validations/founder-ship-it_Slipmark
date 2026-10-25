@@ -147,6 +147,9 @@ code 1 means the gate refused.
 | `signature_invalid` | The verdict is signed, but the signature doesn't verify or the attestation was edited after signing |
 | `unsigned` | Signatures are required and this verdict isn't signed |
 | `signer_not_trusted` | Signatures are required and this verdict was signed by an identity the policy doesn't trust |
+| `context_changed` | An agent context file (AGENTS.md, a skill, an MCP config) changed after this agent's verdict, or the verdict recorded no context. See [Agent context](#agent-context) |
+| `context_unapproved` | A context file changed since the base and no approver (a human, by default) gave it a passing verdict |
+| `hidden_content` | A changed context file has text a reviewer may not see: invisible characters, HTML comments, blank padding or images |
 
 A version 1 attestation is judged on version 1 fields only. Anything else in
 it is ignored.
@@ -273,6 +276,76 @@ workflow from the pull request, so a PR can change the Action's inputs
 (`require`, `fail-on-refusal`, `policy-from`). Keep required paths in the
 policy file, and protect `.github/workflows/` and `.slipmark/` with CODEOWNERS
 and branch protection. Thanks to Kent Bodrov for reporting this.
+
+## Agent context
+
+A verdict depends on the files the agent read, and on what the agent was told.
+AGENTS.md, CLAUDE.md, Cursor rules, skills, hooks and MCP server configs all
+steer a coding agent. The 2026 attacks on coding agents changed exactly these
+and left the reviewed code alone: an AGENTS.md pointing at an image with hidden
+instructions, MCP tool definitions that turned malicious after a few calls,
+skills hiding text in HTML comments or invisible characters.
+
+Add a `context` section to the policy to bind verdicts to their context too:
+
+```json
+{
+  "schema": "slipmark/policy@1",
+  "context": {}
+}
+```
+
+That's enough. With it:
+
+1. **Verdicts record their context.** `slipmark attest` hashes every agent
+   context file in the repo and stores the list in the attestation's `context`
+   field (attestation v2). `--context` records it without a policy;
+   `--no-context` skips it for one verdict.
+2. **A verdict stops counting when its context changes.** If any context file
+   is edited, added or removed after an agent's verdict, the gate refuses it as
+   `context_changed`: the agent was working under different instructions. An
+   agent verdict that recorded no context is refused the same way, unless
+   `requireRecorded` is `false`.
+3. **A change to the context needs approval.** A context file that changed
+   since the base branch needs a current, passing verdict from an allowed
+   approver, a human by default, or the gate refuses it as
+   `context_unapproved`. An agent can't approve its own instructions:
+   ```bash
+   slipmark attest --kind human --by paul --verdict pass --subject AGENTS.md
+   ```
+4. **Hidden text in changed context is refused.** Changed context files are
+   scanned for text a reviewer on GitHub may not see: invisible or
+   direction-changing Unicode, HTML comments, long runs of blank lines, and
+   images referenced from instruction files. Any of these is refused as
+   `hidden_content`, even with a human's approval, because the human may not
+   have seen it. Unchanged files aren't scanned, so an old comment in CLAUDE.md
+   won't start failing builds.
+
+The base branch is the approved context: what's merged has been through this
+gate. Since the policy itself is [read from the base](#the-policy-is-read-from-the-base-branch),
+a pull request can't switch these checks off. Checks 3 and 4 need the base in
+the checkout, so use `actions/checkout` with `fetch-depth: 0`. With no base
+known (a local run), they are skipped and the report says so.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `files` | the list below | Globs for agent context files |
+| `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
+| `requireRecorded` | `true` | Agent verdicts must record their context |
+| `hiddenContent` | `"refuse"` | `"allow"` turns off the hidden-text scan |
+
+Default context files: `AGENTS.md`, `CLAUDE.md` (at any depth),
+`AGENTS.override.md`, `CLAUDE.local.md`, `.claude/**`, `.mcp.json`,
+`.cursorrules`, `.cursor/rules/**`, `.cursor/mcp.json`,
+`.github/copilot-instructions.md`, `.github/instructions/**`,
+`.github/prompts/**`, `.vscode/mcp.json`, `GEMINI.md`, `.gemini/**`,
+`.codex/**`, `.windsurfrules`, `.windsurf/rules/**`. `.slipmark/` is never
+context.
+
+What this doesn't cover yet: the tool definitions an MCP server returns at run
+time (`tools/list`). The server's config and pinned version are hashed, not
+what it says once running. Deleted context files are caught by check 2 but
+don't need approval under check 3.
 
 ## Signed verdicts
 

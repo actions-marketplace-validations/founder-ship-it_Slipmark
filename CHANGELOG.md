@@ -19,6 +19,15 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   `policy.ref` and `policy.sha256`, in `--json` output and in Slipmark Cloud.
 
 ### Added
+- **Agent context.** A `context` section in the policy binds verdicts to the
+  agent's instructions as well as the files it read: AGENTS.md, CLAUDE.md,
+  skills, hooks, Cursor rules and MCP configs. `attest` records their hashes.
+  A verdict given under instructions that later changed is refused
+  (`context_changed`). A context file changed since the base needs a human's
+  verdict (`context_unapproved`). Changed context with text hidden from
+  reviewers (invisible Unicode, HTML comments, blank padding, images) is
+  refused (`hidden_content`). Covers the Ghostcommit, Deadbugz and TrustFall
+  patterns from 2026.
 - `require` in `.slipmark/policy.json`: required paths kept with the policy,
   so they are read from the base branch too. The Action's `require` input is
   in the workflow file, which a pull request can still edit.

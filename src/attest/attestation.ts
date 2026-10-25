@@ -15,6 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { checkSignature, type AttestationSignature, type SignatureCheck, type SignaturePolicy } from "./signing.js";
+import { DEFAULT_CONTEXT_FILES, scanHiddenContent } from "./context.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -84,6 +85,12 @@ export interface Attestation {
   against?: AttestedSubject[];
   /** v2. Checks behind the verdict. */
   checks?: AttestedCheck[];
+  /**
+   * v2. The agent context the verdict was given under: instruction files, skills,
+   * hooks and MCP configs, with their hashes as they were on disk when the verdict
+   * was recorded. If any of them changes, the verdict stops counting.
+   */
+  context?: AttestedSubject[];
   /** Sigstore signature over the rest of the attestation, made where the verdict was given. See signing.ts. */
   signature?: AttestationSignature;
 }
@@ -101,6 +108,19 @@ export interface Policy {
    * request can't loosen it.
    */
   require?: string[];
+  /** Agent context rules. See docs/attestation.md, "Agent context". */
+  context?: ContextPolicy;
+}
+
+export interface ContextPolicy {
+  /** Globs for agent context files. Default: DEFAULT_CONTEXT_FILES. */
+  files?: string[];
+  /** Who may approve a change to a context file: verdicts of these kinds covering it. Default ["human"]. */
+  approvers?: AttesterKind[];
+  /** Agent verdicts must record their context (`slipmark attest` does this when the policy has a context section). Default true. */
+  requireRecorded?: boolean;
+  /** Changed context files with text hidden from human reviewers: "refuse" (default) or "allow". */
+  hiddenContent?: "refuse" | "allow";
 }
 
 /**
@@ -133,7 +153,10 @@ export type CheckStatus =
   | "model_not_allowed"
   | "unsigned"
   | "signature_invalid"
-  | "signer_not_trusted";
+  | "signer_not_trusted"
+  | "context_changed"
+  | "context_unapproved"
+  | "hidden_content";
 
 export interface CheckResult {
   status: CheckStatus;
@@ -157,6 +180,8 @@ export interface VerifyReport {
   failures: CheckResult[];
   /** Which policy file made the decision. */
   policy?: PolicySource;
+  /** Things the reader should know that didn't refuse the gate. */
+  notes?: string[];
 }
 
 export function sha256File(filePath: string): string {
@@ -244,6 +269,8 @@ export function createAttestation(opts: {
   checks?: { command: string; exitCode: number }[];
   kind?: AttesterKind;
   agent?: AgentInfo;
+  /** Record the agent context: true for the default context files, or a list of globs. */
+  context?: boolean | string[];
   /** Test hook: replaces runCheck. */
   runner?: (root: string, command: string) => AttestedCheck;
 }): Attestation {
@@ -271,7 +298,8 @@ export function createAttestation(opts: {
   if (opts.agent?.model) agent.model = opts.agent.model;
   if (opts.agent?.harness) agent.harness = opts.agent.harness;
   if (opts.agent?.harnessVersion) agent.harnessVersion = opts.agent.harnessVersion;
-  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined;
+  const context = opts.context ? contextDigests(root, opts.context === true ? DEFAULT_CONTEXT_FILES : opts.context) : undefined;
+  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined;
 
   const att: Attestation = {
     schema: v2 ? ATTESTATION_SCHEMA_V2 : ATTESTATION_SCHEMA,
@@ -284,8 +312,40 @@ export function createAttestation(opts: {
   if (Object.keys(agent).length > 0) att.agent = agent;
   if (against.length > 0) att.against = against;
   if (checks.length > 0) att.checks = checks;
+  if (context !== undefined) att.context = context;
   if (opts.note) att.note = opts.note;
   return att;
+}
+
+/**
+ * Agent context files in the repo matching `globs`, sorted, repo-relative.
+ * Tracked and untracked files (git ignores excluded); outside git, a walk of the
+ * tree that skips .git and node_modules. .slipmark/ is never context.
+ */
+export function listContextFiles(root: string, globs: string[]): string[] {
+  let all: string[];
+  try {
+    all = git(root, ["ls-files", "-co", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
+  } catch {
+    all = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+        const p = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) {
+          if (e.name !== ".git" && e.name !== "node_modules") walk(p);
+        } else if (e.isFile()) all.push(p);
+      }
+    };
+    walk("");
+  }
+  return [...new Set(all.map(toPosix))]
+    .filter((p) => !p.startsWith(".slipmark/") && matchesAny(p, globs) && existsSync(join(root, p)) && statSync(join(root, p)).isFile())
+    .sort();
+}
+
+/** Hashes of the agent context files, as recorded on an attestation. */
+export function contextDigests(root: string, globs: string[]): AttestedSubject[] {
+  return listContextFiles(root, globs).map((p) => ({ path: p, sha256: sha256File(join(root, p)) }));
 }
 
 /** Default file name for an attestation: one per agent per first subject. */
@@ -339,6 +399,7 @@ function isAttestation(v: unknown): v is Attestation {
   if (a.schema !== ATTESTATION_SCHEMA_V2 || !base) return false;
   if (a.against !== undefined && !isSubjectList(a.against, true)) return false;
   if (a.checks !== undefined && !isCheckList(a.checks)) return false;
+  if (a.context !== undefined && !isSubjectList(a.context, true)) return false;
   if (a.kind !== undefined && !["agent", "tool", "human"].includes(a.kind as string)) return false;
   if (a.agent !== undefined) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -428,6 +489,18 @@ export function parsePolicy(text: string, label: string = POLICY_FILE): Policy {
     if (sig.require && !sig.trusted?.length) {
       throw new Error(`${POLICY_FILE}: signatures.require needs a "trusted" list, for example the workflow that runs your review agent at refs/heads/main`);
     }
+  }
+  const ctx = policy.context;
+  if (ctx !== undefined) {
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) throw new Error(`${POLICY_FILE}: context must be an object`);
+    if (ctx.files !== undefined && !(Array.isArray(ctx.files) && ctx.files.length > 0 && ctx.files.every((g) => typeof g === "string" && g.length > 0))) {
+      throw new Error(`${POLICY_FILE}: context.files must be a list of globs`);
+    }
+    if (ctx.approvers !== undefined && !(Array.isArray(ctx.approvers) && ctx.approvers.length > 0 && ctx.approvers.every((k) => ["agent", "tool", "human"].includes(k)))) {
+      throw new Error(`${POLICY_FILE}: context.approvers must list agent, tool or human`);
+    }
+    if (ctx.requireRecorded !== undefined && typeof ctx.requireRecorded !== "boolean") throw new Error(`${POLICY_FILE}: context.requireRecorded must be true or false`);
+    if (ctx.hiddenContent !== undefined && !["refuse", "allow"].includes(ctx.hiddenContent)) throw new Error(`${POLICY_FILE}: context.hiddenContent must be "refuse" or "allow"`);
   }
   const req = policy.require;
   if (req !== undefined && !(Array.isArray(req) && req.every((r) => typeof r === "string" && r.length > 0))) {
@@ -637,8 +710,11 @@ export function verifyAttestations(opts: {
   signatures?: Map<string, SignatureCheck>;
   /** Where the policy came from, recorded on the report. */
   policySource?: PolicySource;
+  /** Base ref for agent context checks. Default: the ref the policy was read from, else the coverage base. */
+  base?: string;
 }): VerifyReport {
-  const report = verifyCore(opts);
+  const base = opts.base ?? (opts.policySource?.source === "base" ? opts.policySource.ref : undefined);
+  const report = verifyCore({ ...opts, base });
   return opts.policySource ? { ...report, policy: opts.policySource } : report;
 }
 
@@ -648,10 +724,17 @@ function verifyCore(opts: {
   require?: string[];
   policy?: Policy | null;
   signatures?: Map<string, SignatureCheck>;
+  base?: string;
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
+  const notes: string[] = [];
+  const ctxPolicy = policy?.context;
+  const ctxGlobs = ctxPolicy?.files ?? DEFAULT_CONTEXT_FILES;
+  const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
+  /** Which kinds of attester gave a current, passing verdict on each path. */
+  const coveredKinds = new Map<string, Set<AttesterKind>>();
   const required = [...new Set([...(opts.require ?? []), ...(policy?.require ?? [])])];
   const results: CheckResult[] = [];
   const covered = new Set<string>();
@@ -711,6 +794,34 @@ function verifyCore(opts: {
         attFailures.push({ ...who, status: "check_failed", message: `${att.by}: "${c.command}" ${how} ${c.exitCode} when the verdict was recorded` });
       }
     }
+    // The verdict was given under agent instructions that have since changed, or it didn't record them.
+    if (currentContext && (att.kind ?? "agent") === "agent") {
+      if (att.context) {
+        const recorded = new Map(att.context.map((c) => [c.path, c.sha256]));
+        for (const [path, sha] of recorded) {
+          const now = currentContext.get(path);
+          if (now !== sha) {
+            attFailures.push({
+              ...who,
+              subject: path,
+              status: "context_changed",
+              expected: sha,
+              ...(now ? { actual: now } : {}),
+              message: now
+                ? `${att.by} gave "${att.verdict}" under a different version of ${path}. The agent's instructions changed after the verdict.`
+                : `${att.by} gave "${att.verdict}" under ${path}, which is no longer there. The agent's instructions changed after the verdict.`,
+            });
+          }
+        }
+        for (const path of currentContext.keys()) {
+          if (!recorded.has(path)) {
+            attFailures.push({ ...who, subject: path, status: "context_changed", message: `${path} was added to the agent's context after ${att.by} gave "${att.verdict}"` });
+          }
+        }
+      } else if (ctxPolicy?.requireRecorded !== false) {
+        attFailures.push({ ...who, status: "context_changed", message: `${att.by}: verdict records no agent context, so there's no telling what the agent was told. Attest again with a current Slipmark (it records context when the policy has a context section).` });
+      }
+    }
     const allow = policy?.models?.allow;
     if (allow && !(att.agent?.model && allow.includes(att.agent.model))) {
       const model = att.agent?.model ? `model ${att.agent.model}` : "no model recorded";
@@ -759,6 +870,8 @@ function verifyCore(opts: {
         continue;
       }
       covered.add(relKey);
+      if (!coveredKinds.has(relKey)) coveredKinds.set(relKey, new Set());
+      coveredKinds.get(relKey)!.add(att.kind ?? "agent");
       results.push({ ...base, status: "verified", ...(signer ? { signer } : {}), message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
@@ -797,15 +910,49 @@ function verifyCore(opts: {
     }
   }
 
+  // A change to the agent's context needs approval from someone it allows (by default a human verdict),
+  // and must not hide text from the people reviewing it.
+  if (ctxPolicy) {
+    const ctxBase = opts.base ?? policy?.coverage?.base;
+    if (!ctxBase) {
+      notes.push("Agent context changes weren't checked: no base branch is known. In a pull request the Action supplies it; locally, pass --policy-from <ref> or --coverage diff --base <ref>.");
+    } else {
+      const approvers = ctxPolicy.approvers ?? ["human"];
+      for (const f of changedFiles(root, ctxBase)) {
+        const path = toPosix(f);
+        if (!currentContext!.has(path)) continue;
+        const kinds = coveredKinds.get(path);
+        if (!kinds || !approvers.some((k) => kinds.has(k))) {
+          results.push({
+            status: "context_unapproved",
+            subject: path,
+            message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${approvers.join(" or ")}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`,
+          });
+        }
+        if (ctxPolicy.hiddenContent !== "allow") {
+          const findings = scanHiddenContent(path, readFileSync(join(root, path), "utf8"));
+          if (findings.length) {
+            const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            results.push({
+              status: "hidden_content",
+              subject: path,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or set context.hiddenContent to "allow" on the base branch.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
   const failures = results.filter((r) => r.status !== "verified");
   const checked = results.length;
   // An empty run is not a pass: a gate with nothing to check proves nothing.
   const ok = failures.length === 0 && checked > 0;
   if (checked === 0) {
     const empty: CheckResult = { status: "unattested", message: `no attestations found in ${toPosix(relative(root, dir)) || "."}` };
-    return { ok: false, checked: 0, results: [empty], failures: [empty] };
+    return { ok: false, checked: 0, results: [empty], failures: [empty], ...(notes.length ? { notes } : {}) };
   }
-  return { ok, checked, results, failures };
+  return { ok, checked, results, failures, ...(notes.length ? { notes } : {}) };
 }
 
 /**
