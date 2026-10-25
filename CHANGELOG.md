@@ -4,7 +4,36 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Security
+- **The policy is read from the base branch** (thanks Kent Bodrov). Before,
+  `verify` read `.slipmark/policy.json` from the pull request's own checkout,
+  so a PR could loosen the rules it was judged by, for example by dropping a
+  required path. Now the policy comes from `--policy-from <ref>`, the coverage
+  base, or the pull request's base branch in GitHub Actions (the Action
+  fetches it). A branch that changes the policy gets a notice and the change
+  applies after merge. Local runs with no base behave as before.
+  `--policy-from working-tree` restores the old behaviour. Subfolder runs
+  read that folder's policy from the base, as they do from disk. The pull
+  request's base is looked up by its full ref name, so a tag can't pose as it.
+- Every report records the policy that decided it: `policy.source`,
+  `policy.ref` and `policy.sha256`, in `--json` output and in Slipmark Cloud.
+
 ### Added
+- **Agent context.** A `context` section in the policy binds verdicts to the
+  agent's instructions as well as the files it read: AGENTS.md, CLAUDE.md,
+  skills, hooks, Cursor rules and MCP configs. `attest` records their hashes.
+  A verdict given under instructions that later changed is refused
+  (`context_changed`). A context file changed since the base needs an approver's
+  verdict, or signed approvals with `approverSigners`
+  (`context_unapproved`). Changed context with text hidden from reviewers
+  (invisible or smuggling Unicode, HTML comments, Markdown comments, blank
+  padding, images) is refused (`hidden_content`). Links in agent context are
+  refused unless they point at other context files. Covers the patterns behind
+  the Ghostcommit, Deadbugz and TrustFall attacks of 2026.
+- `require` in `.slipmark/policy.json`: required paths kept with the policy,
+  so they are read from the base branch too. The Action's `require` input is
+  in the workflow file, which a pull request can still edit.
+- The Action's `policy-from` input.
 - **Diff coverage.** `slipmark verify --coverage diff --base <ref>` refuses
   any file changed since the base that no current, passing verdict covers
   (new status `uncovered`). `--ignore <glob>` leaves paths out. The Action

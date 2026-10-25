@@ -147,18 +147,23 @@ code 1 means the gate refused.
 | `signature_invalid` | The verdict is signed, but the signature doesn't verify or the attestation was edited after signing |
 | `unsigned` | Signatures are required and this verdict isn't signed |
 | `signer_not_trusted` | Signatures are required and this verdict was signed by an identity the policy doesn't trust |
+| `context_changed` | An agent context file (AGENTS.md, a skill, an MCP config) changed after this agent's verdict, or the verdict recorded no context. See [Agent context](#agent-context) |
+| `context_unapproved` | A context file changed since the base and no approver (a human, by default) gave it a passing verdict, or a context path is a link to something that isn't context |
+| `hidden_content` | A changed context file has text a reviewer may not see: invisible characters, HTML comments, blank padding or images |
 
 A version 1 attestation is judged on version 1 fields only. Anything else in
 it is ignored.
 
 When an attestation fails on `against_changed`, `check_failed`,
-`model_not_allowed` or any signature status, none of its subjects count. So `--require` and coverage
+`model_not_allowed`, `context_changed` or any signature status, none of its subjects count. So `--require` and coverage
 report them as not covered too.
 
 Exit code 2 means the command couldn't run. For `verify`: a malformed policy,
 a coverage base that isn't in the checkout or isn't a plain ref, coverage run
 from somewhere other than the repository root, signatures required but
-Sigstore unreachable, or a flag given with no value.
+Sigstore unreachable, a `--policy-from` ref that isn't in the checkout, a
+policy on the base that isn't a regular file in a real folder, a subfolder run
+when only the repository root has a policy, or a flag given with no value.
 For `attest`: a passing verdict refused because a check failed, a missing or
 unreadable subject, or bad input.
 
@@ -225,11 +230,173 @@ Put the same settings in `.slipmark/policy.json` and every `verify` run
   re-review when you change models. The model is a claimed field, so this
   catches mistakes, not an attester that lies about its model.
 - `signatures`: see [Signed verdicts](#signed-verdicts).
+- `require`: files that must have a current, passing verdict, added to any
+  `--require`. Prefer this to the Action's `require` input: the policy file is
+  read from the base branch, the workflow file isn't (see below).
 
-`--no-policy` ignores the file for one run. The file is read from the folder
-`verify` runs in. If it runs from a subfolder while the repository root has a
-policy file, it exits 2 rather than silently skipping the root's rules. Globs support `**`, `*` and `?`
-and match the whole path from the repository root.
+`--no-policy` ignores the file for one run. If `verify` runs from a subfolder
+while the repository root has a policy file, it exits 2 rather than silently
+skipping the root's rules. Globs support `**`, `*` and `?` and match the whole
+path from the repository root.
+
+### The policy is read from the base branch
+
+A pull request can edit `.slipmark/policy.json`. If the gate read the policy
+from the pull request's own checkout, the PR could loosen the rules it is
+judged by: drop a path from `require`, remove a model restriction, switch
+coverage off. So when a base is known, the policy is read from there:
+
+1. `--policy-from <ref>` (or the Action's `policy-from` input), if given.
+   The ref must be in the checkout, or `verify` exits 2.
+2. Otherwise the base given with `--coverage diff --base <ref>` on the
+   command line, then the pull request's base branch
+   (`refs/remotes/origin/$GITHUB_BASE_REF` in GitHub Actions, which must exist
+   under exactly that name, so a tag can't stand in for it). The Action fetches the base branch for you
+   when the checkout doesn't have it. `coverage.base` inside the policy file is
+   not used to find the policy.
+3. Otherwise (a local run, a push build) the checkout's own policy, as in v0.4.
+   If a base was expected but isn't in the checkout, the report says so and the
+   checkout's policy is used.
+
+Run from a subfolder (a package in a monorepo), `verify` reads that folder's
+`.slipmark/policy.json` from the base, just as it reads it from disk. If the
+folder has none but the repository root does, it exits 2 rather than skip the
+root's rules. A policy file on the base that isn't a regular file, or sits in a folder that
+isn't a real folder (a linked `.slipmark`, for example), is an error, never
+treated as "no policy".
+
+A branch that changes, adds or deletes the policy gets a notice: the base
+policy is applied, and the change takes effect once it's merged. Every report
+records which policy decided it: `policy.source` (`base`, `working-tree` or
+`none`), `policy.ref`, and `policy.sha256`, the hash of the exact file applied.
+`--policy-from working-tree` restores the old behaviour.
+
+What this doesn't cover: the workflow file itself. GitHub runs a pull request's
+workflow from the pull request, so a PR can change the Action's inputs
+(`require`, `fail-on-refusal`, `policy-from`). Keep required paths in the
+policy file, and protect `.github/workflows/` and `.slipmark/` with CODEOWNERS
+and branch protection. Thanks to Kent Bodrov for reporting this.
+
+## Agent context
+
+A verdict depends on the files the agent read, and on what the agent was told.
+AGENTS.md, CLAUDE.md, Cursor rules, skills, hooks and MCP server configs all
+steer a coding agent. The 2026 attacks on coding agents changed exactly these
+and left the reviewed code alone: instruction files pointing at images with
+hidden text, MCP tool definitions that turned malicious after a few calls,
+skills hiding text in HTML comments or invisible characters.
+
+Add a `context` section to the policy to bind verdicts to their context too:
+
+```json
+{
+  "schema": "slipmark/policy@1",
+  "context": {}
+}
+```
+
+That's enough to start. With it:
+
+1. **Verdicts record their context.** `slipmark attest` hashes every agent
+   context file in the repo and stores the list in the attestation's `context`
+   field (attestation v2). It does this for every verdict whose `kind` isn't
+   `human`. `--context` records it without a policy; `--no-context` skips it.
+2. **A verdict stops counting when its context changes.** If any context file
+   is edited, added or removed after a verdict, the gate refuses it as
+   `context_changed`: the agent was working under different instructions, and
+   none of its subjects count. A verdict that recorded no context is refused the
+   same way, unless `requireRecorded` is `false`. This applies to `agent` and
+   `tool` verdicts alike.
+3. **A change to the context needs approval.** A context file that changed
+   since the base branch needs a current, passing verdict from an approver, or
+   the gate refuses it as `context_unapproved`. By default an approver is a
+   verdict with `kind: human`:
+   ```bash
+   slipmark attest --kind human --by paul --verdict pass --subject AGENTS.md
+   ```
+4. **Hidden text in changed context is refused.** A changed context file is
+   scanned, the whole file, for text a reviewer on GitHub may not see:
+   invisible, direction-changing or text-smuggling Unicode (zero-width
+   characters, bidirectional controls, tags, variation selectors, fillers);
+   HTML comments, including one never closed; other raw HTML GitHub doesn't
+   show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
+   that hide text (used as a comment like `[//]: # (...)`, carrying a title, or
+   never used by a link); runs of 20 or more lines that render empty (blank,
+   `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
+   Comments, HTML and images are only looked for in prose files (Markdown, MDX,
+   text, no extension), because GitHub shows JSON and YAML as raw text. Any finding is
+   refused as `hidden_content`, even with an approval, because the approver may
+   not have seen it. Unchanged files aren't scanned, but once a file is
+   touched, an old comment in it counts too.
+5. **Links and submodules are refused.** A context path that is a link is
+   refused as `context_unapproved`, on every run, unless it points at another
+   context file in the repo (`CLAUDE.md -> AGENTS.md` is fine; its content is
+   watched through the target). A link to anything else, a linked folder such
+   as `.claude -> tools/cfg`, or a git submodule at a context path would put
+   instructions where the gate doesn't look.
+
+### Who can approve
+
+`kind` is a claim. An agent can write `--kind human` on its own verdict, so
+on its own, check 3 stops mistakes and casual changes, not an agent that
+lies. To make approval mean something:
+
+- **Require a person on GitHub.** Add the context paths to CODEOWNERS and
+  require code owner review in branch protection. GitHub then enforces a human
+  review of any change to them, whatever Slipmark is told.
+- **Require a signed approval.** Set `approverSigners` to the identities whose
+  [signed verdicts](#signed-verdicts) may approve, for example a workflow that
+  only runs after a code owner approves. An approval then counts only if its
+  signature is valid and its signer matches. `*` matches anything.
+
+### Where the checks run
+
+The base branch is the approved context: what's merged has been through this
+gate. Since the policy itself is [read from the base](#the-policy-is-read-from-the-base-branch),
+a pull request can't switch these checks off. Checks 3 and 4 compare against
+the base, so use `actions/checkout` with `fetch-depth: 0`. In a pull request
+whose base isn't in the checkout, `verify` exits 2 rather than skip them, as
+long as the policy it could read has a `context` section. If the base can't be
+fetched, the policy comes from the pull request itself (see
+[above](#the-policy-is-read-from-the-base-branch)), which could drop the
+section; the Action fetches the base to avoid that, and warns if it can't.
+With no base expected at all (a local run), they are skipped and the report
+says so.
+
+Context checks run from the repository root. An agent working in a subfolder
+still reads the root's AGENTS.md, so the check covers the whole repository;
+from a subfolder, `attest` and `verify` exit 2.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context |
+| `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
+| `approverSigners` | none | If set, an approval must also be signed by one of these identities |
+| `requireRecorded` | `true` | Verdicts must record their context |
+| `hiddenContent` | `"refuse"` | `"allow"` turns off the hidden-text scan |
+
+Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
+`CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` and `.claude/` at any depth;
+`.mcp.json` at any depth; `CONVENTIONS.md`, `.vscode/mcp.json`,
+`.vscode/settings.json`, `.cursorrules`, `.cursor/`,
+`.github/copilot-instructions.md`, `.github/instructions/`,
+`.github/prompts/`, `.github/agents/`, `.github/chatmodes/`, `.agents/`,
+`.gemini/`, `.codex/`, `.windsurfrules`, `.windsurf/`, `.clinerules`,
+`.roo/`, `.amazonq/rules/` and `.junie/`. `.slipmark/` is never context.
+
+### What this doesn't cover yet
+
+- **Files the instructions point to.** An image or document referenced from
+  AGENTS.md, or a file imported with `@docs/review.md`, isn't context unless
+  it matches `files`. Changing it doesn't trip checks 2 to 4. Add such paths
+  to `files`, or keep instructions self-contained.
+- **What an MCP server does at run time.** Its config and pinned version are
+  hashed, not the tool definitions it returns (`tools/list`) or the source of
+  a local server.
+- **The prompt in a workflow file.** A prompt passed to an agent from
+  `.github/workflows/` isn't context; protect workflows with CODEOWNERS.
+- **Deletions.** Deleting a context file is caught by check 2, so verdicts
+  must be redone, but it needs no approval under check 3.
 
 ## Signed verdicts
 
@@ -267,8 +434,10 @@ slipmark verify --require-signed \
 or `signatures.require` and `signatures.trusted` in the policy file, or the
 Action's `require-signed` and `trusted-signers` inputs. Then a verdict typed by
 hand, or made by any other workflow, doesn't count. `*` in a trusted identity
-matches anything. Each verified result names its signer, and Slipmark Cloud
-shows it on the proof record.
+matches anything. `signatures.issuer` sets the OIDC issuer the signing
+certificate must come from (an https URL); it defaults to GitHub Actions. Each
+verified result names its signer, and Slipmark Cloud shows it on the proof
+record.
 
 **Trust a workflow at a protected ref.** On a pull request, GitHub runs the
 workflow file from the pull request itself, so the identity ends in
