@@ -54,6 +54,8 @@ attest
   [--model <name>] [--harness <name>] [--kind agent|tool|human]
   [--note "..."] [--dir .slipmark/attestations] [--out <file>]
   [--sign]                   sign it with this job's identity (GitHub Actions, id-token: write)
+  [--acknowledge-hidden]     approver: you've read text in these files that GitHub hides
+                             (comments, link definitions, images) and accept it
   [--context | --no-context] record the agent's context (AGENTS.md, CLAUDE.md, skills, MCP
                              configs). On by default for agents when the policy has "context"
   A passing verdict is refused if any --run or --check exited non-zero.
@@ -326,6 +328,7 @@ async function attestMain(args: string[]): Promise<void> {
       kind,
       agent: model || harness ? { model, harness } : undefined,
       context,
+      acknowledgeHidden: args.includes("--acknowledge-hidden"),
     });
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));

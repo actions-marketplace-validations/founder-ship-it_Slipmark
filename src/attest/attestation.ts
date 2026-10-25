@@ -15,7 +15,8 @@
  */
 import { createHash } from "node:crypto";
 import { checkSignature, type AttestationSignature, type SignatureCheck, type SignaturePolicy } from "./signing.js";
-import { DEFAULT_CONTEXT_FILES, scanHiddenContent } from "./context.js";
+import { DEFAULT_CONTEXT_FILES, MAX_SCAN, isMarkdownish, scanHiddenContent, type HiddenFinding } from "./context.js";
+import { compareWithGitHub, githubRenderer, type RenderFn } from "./githubRender.js";
 import { identityMatches } from "./signing.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -92,6 +93,12 @@ export interface Attestation {
    * was recorded. If any of them changes, the verdict stops counting.
    */
   context?: AttestedSubject[];
+  /**
+   * v2. The approver has seen text in these exact files that GitHub doesn't
+   * display (comments, link definitions, images) and accepts it. Lets a context
+   * change with such content through when given by an allowed approver.
+   */
+  acknowledgedHidden?: true;
   /** Sigstore signature over the rest of the attestation, made where the verdict was given. See signing.ts. */
   signature?: AttestationSignature;
 }
@@ -129,6 +136,12 @@ export interface ContextPolicy {
   requireRecorded?: boolean;
   /** Changed context files with text hidden from human reviewers: "refuse" (default) or "allow". */
   hiddenContent?: "refuse" | "allow";
+  /**
+   * Also check changed context files against GitHub's own renderer. "auto"
+   * (default): in GitHub Actions, with a token. "require": refuse when it can't
+   * run. "off": never.
+   */
+  githubRender?: "auto" | "require" | "off";
 }
 
 /**
@@ -281,6 +294,8 @@ export function createAttestation(opts: {
   agent?: AgentInfo;
   /** Record the agent context: true for the default context files, or a list of globs. */
   context?: boolean | string[];
+  /** The attester has read the hidden content in these files and accepts it. */
+  acknowledgeHidden?: boolean;
   /** Test hook: replaces runCheck. */
   runner?: (root: string, command: string) => AttestedCheck;
 }): Attestation {
@@ -309,7 +324,7 @@ export function createAttestation(opts: {
   if (opts.agent?.harness) agent.harness = opts.agent.harness;
   if (opts.agent?.harnessVersion) agent.harnessVersion = opts.agent.harnessVersion;
   const context = opts.context ? contextDigests(root, opts.context === true ? DEFAULT_CONTEXT_FILES : opts.context) : undefined;
-  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined;
+  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined || !!opts.acknowledgeHidden;
 
   const att: Attestation = {
     schema: v2 ? ATTESTATION_SCHEMA_V2 : ATTESTATION_SCHEMA,
@@ -323,6 +338,7 @@ export function createAttestation(opts: {
   if (against.length > 0) att.against = against;
   if (checks.length > 0) att.checks = checks;
   if (context !== undefined) att.context = context;
+  if (opts.acknowledgeHidden) att.acknowledgedHidden = true;
   if (opts.note) att.note = opts.note;
   return att;
 }
@@ -511,6 +527,7 @@ function isAttestation(v: unknown): v is Attestation {
   if (a.against !== undefined && !isSubjectList(a.against, true)) return false;
   if (a.checks !== undefined && !isCheckList(a.checks)) return false;
   if (a.context !== undefined && !isSubjectList(a.context, true)) return false;
+  if (a.acknowledgedHidden !== undefined && a.acknowledgedHidden !== true) return false;
   if (a.kind !== undefined && !["agent", "tool", "human"].includes(a.kind as string)) return false;
   if (a.agent !== undefined) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -614,6 +631,7 @@ export function parsePolicy(text: string, label: string = POLICY_FILE): Policy {
       throw new Error(`${POLICY_FILE}: context.approverSigners must be a list of signer identities`);
     }
     if (ctx.requireRecorded !== undefined && typeof ctx.requireRecorded !== "boolean") throw new Error(`${POLICY_FILE}: context.requireRecorded must be true or false`);
+    if (ctx.githubRender !== undefined && !["auto", "require", "off"].includes(ctx.githubRender)) throw new Error(`${POLICY_FILE}: context.githubRender must be "auto", "require" or "off"`);
     if (ctx.hiddenContent !== undefined && !["refuse", "allow"].includes(ctx.hiddenContent)) throw new Error(`${POLICY_FILE}: context.hiddenContent must be "refuse" or "allow"`);
   }
   const req = policy.require;
@@ -828,6 +846,9 @@ export function verifyAttestations(opts: {
   policySource?: PolicySource;
   /** Base ref for agent context checks. Default: the ref the policy was read from, else the coverage base. */
   base?: string;
+  /** Findings from GitHub's renderer, by path (see verifyWithSignatures), and notes about that check. */
+  renderFindings?: Map<string, HiddenFinding[]>;
+  renderNotes?: string[];
 }): VerifyReport {
   const base = opts.base ?? (opts.policySource?.source === "base" ? opts.policySource.ref : undefined);
   const policy = opts.policy === undefined ? loadPolicy(resolve(opts.root ?? process.cwd())) : opts.policy;
@@ -845,17 +866,19 @@ function verifyCore(opts: {
   policy?: Policy | null;
   signatures?: Map<string, SignatureCheck>;
   base?: string;
+  renderFindings?: Map<string, HiddenFinding[]>;
+  renderNotes?: string[];
 }): VerifyReport {
   const root = resolve(opts.root ?? process.cwd());
   const dir = resolve(root, opts.dir ?? ".slipmark/attestations");
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
-  const notes: string[] = [];
+  const notes: string[] = [...(opts.renderNotes ?? [])];
   const ctxPolicy = policy?.context;
   const ctxGlobs = ctxPolicy?.files ?? DEFAULT_CONTEXT_FILES;
   const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
   const contextProblems = ctxPolicy ? scanContext(root, ctxGlobs).problems : [];
   /** Who gave a current, passing verdict on each path: its claimed kind, and its signer when the signature is valid. */
-  const coveredBy = new Map<string, { kind: AttesterKind; signedBy?: string }[]>();
+  const coveredBy = new Map<string, { kind: AttesterKind; signedBy?: string; by: string; ackHidden: boolean }[]>();
   const required = [...new Set([...(opts.require ?? []), ...(policy?.require ?? [])])];
   const results: CheckResult[] = [];
   const covered = new Set<string>();
@@ -992,7 +1015,7 @@ function verifyCore(opts: {
       }
       covered.add(relKey);
       if (!coveredBy.has(relKey)) coveredBy.set(relKey, []);
-      coveredBy.get(relKey)!.push({ kind: att.kind ?? "agent", ...(sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {}) });
+      coveredBy.get(relKey)!.push({ kind: att.kind ?? "agent", by: att.by, ackHidden: att.acknowledgedHidden === true, ...(sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {}) });
       results.push({ ...base, status: "verified", ...(signer ? { signer } : {}), message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
@@ -1043,11 +1066,13 @@ function verifyCore(opts: {
     } else {
       const approvers = ctxPolicy.approvers ?? ["human"];
       const signers = ctxPolicy.approverSigners;
-      const approved = (path: string) =>
-        (coveredBy.get(path) ?? []).some(
+      const approvals = (path: string) =>
+        (coveredBy.get(path) ?? []).filter(
           (v) => approvers.includes(v.kind) && (!signers || (v.signedBy !== undefined && signers.some((p) => identityMatches(v.signedBy!, p)))),
         );
+      const approved = (path: string) => approvals(path).length > 0;
       const problemPaths = new Set(contextProblems.map((p) => p.path));
+      const scanStarted = Date.now();
       for (const f of changedFiles(root, ctxBase, "agent context")) {
         const path = toPosix(f);
         if (!currentContext!.has(path) || problemPaths.has(path)) continue;
@@ -1059,14 +1084,37 @@ function verifyCore(opts: {
             message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${who}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`,
           });
         }
-        if (ctxPolicy.hiddenContent !== "allow") {
-          const findings = scanHiddenContent(path, readFileSync(join(root, path), "utf8"));
+        if (ctxPolicy.hiddenContent !== "allow" && Date.now() - scanStarted > 60_000) {
+          // Each file has its own time limit; this caps them all together, so many files can't add up to a stall.
+          results.push({ status: "hidden_content", subject: path, message: `${path} wasn't checked: the agent context checks ran out of time (a minute in all). Split the change, or simplify these files.` });
+        } else if (ctxPolicy.hiddenContent !== "allow") {
+          let text: string | null;
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));
+          } catch {
+            text = null; // UTF-16 or binary: the scan can't read it, so neither can a reviewer be sure what it says
+          }
+          const findings: HiddenFinding[] = [
+            ...(text === null
+              ? [{ path, line: 1, kind: "invisible_characters" as const, detail: "not valid UTF-8, so its text can't be checked" }]
+              : scanHiddenContent(path, text)),
+            ...(opts.renderFindings?.get(path) ?? []),
+          ];
           if (findings.length) {
             const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            // An acknowledgement is only as strong as its signature: unsigned, anyone opening the PR could write one.
+            const ack = signers ? approvals(path).find((v) => v.ackHidden) : undefined;
+            if (!signers && approvals(path).some((v) => v.ackHidden)) {
+              notes.push(`${path}: an acknowledgement of hidden content was recorded but doesn't count: set context.approverSigners so acknowledgements must be signed`);
+            }
+            if (ack) {
+              notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
+              continue;
+            }
             results.push({
               status: "hidden_content",
               subject: path,
-              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or set context.hiddenContent to "allow" on the base branch.`,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). ${signers ? `Remove it, or, if you've read it and accept it, sign an acknowledgement: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --sign --subject ${path}` : `Remove it. To accept content like this after reading it, set context.approverSigners on the base branch and sign an acknowledgement, or set context.hiddenContent to "allow".`}`,
             });
           }
         }
@@ -1123,9 +1171,75 @@ export async function verifyWithSignatures(opts: {
   policy?: Policy | null;
   policySource?: PolicySource;
   verify?: Parameters<typeof checkSignature>[2];
+  /** GitHub's renderer. Omitted: from the environment (GitHub Actions with a token). null: don't use it. */
+  render?: RenderFn | null;
 }): Promise<VerifyReport> {
   const root = resolve(opts.root ?? process.cwd());
   const policy = opts.policy === undefined ? loadPolicy(root) : opts.policy;
   const signatures = await checkSignatures({ root, dir: opts.dir, policy, verify: opts.verify });
-  return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures, policySource: opts.policySource });
+  const rendered = await renderCheck(root, policy, opts.policySource, opts.render);
+  return verifyAttestations({ root, dir: opts.dir, require: opts.require, policy, signatures, policySource: opts.policySource, ...rendered });
+}
+
+/** Most time the renderer check may take in all, across files, before the rest are refused. */
+const RENDER_BUDGET_MS = 60_000;
+
+/** The renderer from the environment: GitHub Actions with SLIPMARK_GITHUB_TOKEN or GITHUB_TOKEN set. */
+function rendererFromEnv(): RenderFn | null {
+  const token = process.env.SLIPMARK_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  if (process.env.GITHUB_ACTIONS !== "true" || !token) return null;
+  return githubRenderer({ token, repo: process.env.GITHUB_REPOSITORY, apiUrl: process.env.GITHUB_API_URL });
+}
+
+/**
+ * Ask GitHub to render each changed agent context file that passed the
+ * allow-list, and compare. Files the allow-list refuses are refused already.
+ */
+async function renderCheck(
+  root: string,
+  policy: Policy | null,
+  source: PolicySource | undefined,
+  given: RenderFn | null | undefined,
+): Promise<{ renderFindings?: Map<string, HiddenFinding[]>; renderNotes?: string[] }> {
+  const ctx = policy?.context;
+  if (!ctx || ctx.hiddenContent === "allow" || ctx.githubRender === "off") return {};
+  const base = (source?.source === "base" ? source.ref : undefined) ?? policy?.coverage?.base;
+  if (!base) return {}; // verify says context changes weren't checked
+  let changed: string[];
+  try {
+    const context = new Set(scanContext(root, ctx.files ?? DEFAULT_CONTEXT_FILES).files);
+    changed = changedFiles(root, base, "agent context").map(toPosix).filter((p) => context.has(p) && isMarkdownish(p));
+  } catch {
+    return {}; // verify reports the same problem
+  }
+  if (!changed.length) return {};
+  const findings = new Map<string, HiddenFinding[]>();
+  const started = Date.now();
+  const render = given === undefined ? rendererFromEnv() : given;
+  if (!render) {
+    // Inside GitHub Actions the check is expected to run: without a token it refuses, rather than quietly skipping.
+    if (ctx.githubRender === "require" || (given === undefined && process.env.GITHUB_ACTIONS === "true")) {
+      for (const path of changed) {
+        findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "GitHub's renderer check couldn't run: it needs GitHub Actions and a token (the Slipmark Action passes one; set SLIPMARK_GITHUB_TOKEN when running the CLI)" }]);
+      }
+      return { renderFindings: findings };
+    }
+    return { renderNotes: ["GitHub's renderer check didn't run: it needs GitHub Actions and a token (the Slipmark Action passes one). The allow-list still applied."] };
+  }
+  for (const path of changed) {
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));
+    } catch {
+      continue; // refused by the scan as not UTF-8
+    }
+    if (Buffer.byteLength(text, "utf8") > MAX_SCAN) continue; // refused by the scan as too large
+    if (Date.now() - started > RENDER_BUDGET_MS) {
+      findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "ran out of time checking against GitHub's renderer" }]);
+      continue;
+    }
+    const f = await compareWithGitHub(path, text, render);
+    if (f.length) findings.set(path, f);
+  }
+  return { renderFindings: findings, renderNotes: [`Checked ${changed.length} changed agent context file(s) against GitHub's renderer.`] };
 }

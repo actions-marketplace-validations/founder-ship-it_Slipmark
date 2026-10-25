@@ -4,6 +4,8 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
 ### Security
 - **The policy is read from the base branch** (thanks Kent Bodrov). Before,
   `verify` read `.slipmark/policy.json` from the pull request's own checkout,
@@ -28,8 +30,13 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   (`context_unapproved`). Changed context with text hidden from reviewers
   (invisible or smuggling Unicode, HTML comments, Markdown comments, blank
   padding, images) is refused (`hidden_content`). Links in agent context are
-  refused unless they point at other context files. Covers the patterns behind
-  the Ghostcommit, Deadbugz and TrustFall attacks of 2026.
+  refused unless they point at other context files, and so are submodules.
+  Changed agent instructions must be plain Markdown GitHub shows in full: an
+  allow-list of constructs (anything unknown is refused, including anything
+  GitHub adds later), pattern checks as a second net, and, in GitHub Actions,
+  a comparison with GitHub's own Markdown renderer. Approvers can acknowledge
+  flagged content with a signed verdict. Covers the patterns behind the
+  Ghostcommit, Deadbugz and TrustFall attacks of 2026.
 - `require` in `.slipmark/policy.json`: required paths kept with the policy,
   so they are read from the base branch too. The Action's `require` input is
   in the workflow file, which a pull request can still edit.

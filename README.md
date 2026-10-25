@@ -10,7 +10,7 @@ Add it to a workflow:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.4.0
+- uses: founder-ship-it/Slipmark@v0.5.0
   with:
     require: |
       specs/your-spec.md
@@ -48,7 +48,7 @@ Slipmark does two things:
    to fake confidence it doesn't have), and hands your coding agent a repair
    prompt.
 
-> Status: `v0.4.0`, early. Apache-2.0. Optional hosted layer: [Slipmark Cloud](#slipmark-cloud).
+> Status: `v0.5.0`, early. Apache-2.0. Optional hosted layer: [Slipmark Cloud](#slipmark-cloud).
 
 ## Why the gate exists
 
@@ -229,7 +229,7 @@ and Slipmark binds each verdict to the agent's instructions too:
 
 - a verdict given under instructions that later changed stops counting
 - a change to AGENTS.md, CLAUDE.md, a skill or an MCP config needs an approver's verdict (pair it with CODEOWNERS, or require signed approvals)
-- changed instructions with hidden text (invisible characters, HTML comments, images) are refused
+- changed instructions must be plain Markdown that GitHub shows in full: an allow-list refuses anything else (HTML, comments, images, diagrams, anything GitHub adds later), and in GitHub Actions each file is checked against GitHub's own renderer
 - context files that link outside the watched set are refused
 
 The policy is read from the base branch, so a pull request can't switch this
@@ -264,7 +264,7 @@ refused. Details, including which ref to trust, in
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: founder-ship-it/Slipmark@v0.4.0
+- uses: founder-ship-it/Slipmark@v0.5.0
   with:
     require: |
       specs/invoice-export.md
@@ -318,7 +318,7 @@ jobs:
       id-token: write   # GitHub signs a token saying which repo and run this is. No API key.
     steps:
       - uses: actions/checkout@v4
-      - uses: founder-ship-it/Slipmark@v0.4.0
+      - uses: founder-ship-it/Slipmark@v0.5.0
         with:
           cloud: "true"
 ```

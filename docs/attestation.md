@@ -149,7 +149,7 @@ code 1 means the gate refused.
 | `signer_not_trusted` | Signatures are required and this verdict was signed by an identity the policy doesn't trust |
 | `context_changed` | An agent context file (AGENTS.md, a skill, an MCP config) changed after this agent's verdict, or the verdict recorded no context. See [Agent context](#agent-context) |
 | `context_unapproved` | A context file changed since the base and no approver (a human, by default) gave it a passing verdict, or a context path is a link to something that isn't context |
-| `hidden_content` | A changed context file has text a reviewer may not see: invisible characters, HTML comments, blank padding or images |
+| `hidden_content` | A changed context file isn't plain Markdown GitHub shows in full: see check 4 of [Agent context](#agent-context) |
 
 A version 1 attestation is judged on version 1 fields only. Anything else in
 it is ignored.
@@ -314,20 +314,81 @@ That's enough to start. With it:
    ```bash
    slipmark attest --kind human --by paul --verdict pass --subject AGENTS.md
    ```
-4. **Hidden text in changed context is refused.** A changed context file is
-   scanned, the whole file, for text a reviewer on GitHub may not see:
-   invisible, direction-changing or text-smuggling Unicode (zero-width
-   characters, bidirectional controls, tags, variation selectors, fillers);
-   HTML comments, including one never closed; other raw HTML GitHub doesn't
-   show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
-   that hide text (used as a comment like `[//]: # (...)`, carrying a title, or
-   never used by a link); runs of 20 or more lines that render empty (blank,
-   `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
-   Comments, HTML and images are only looked for in prose files (Markdown, MDX,
-   text, no extension), because GitHub shows JSON and YAML as raw text. Any finding is
-   refused as `hidden_content`, even with an approval, because the approver may
-   not have seen it. Unchanged files aren't scanned, but once a file is
-   touched, an old comment in it counts too.
+4. **Agent instructions must be plain Markdown that GitHub shows in full.**
+   Text a reviewer can't see on GitHub shouldn't reach an agent. Rather than
+   hunt for every way GitHub can hide text, Slipmark allows only what's known
+   to be visible, and refuses the rest as `hidden_content`. A changed context
+   file, the whole file, goes through three layers:
+
+   - **The allow-list.** The file is parsed as GitHub Markdown and may use
+     only: headings, paragraphs, lists and task lists, quotes, tables,
+     horizontal rules, bold, italic, strikethrough, inline code, line breaks,
+     escapes, inline links (`[text](url)`), and code blocks with no language
+     or a programming language and nothing after it. Anything else is
+     refused: raw HTML, images, link and footnote definitions, link titles,
+     diagram blocks, table rows with more cells than the header, and any
+     construct this list doesn't know, including ones GitHub adds in future. The parser runs in a separate process with a time limit, so a
+     file built to stall it is refused, not left running.
+   - **Pattern checks**, as a second net where parsers can disagree:
+     invisible, direction-changing or text-smuggling Unicode, written
+     directly or as an HTML entity such as `&#x200B;` or `&ZeroWidthSpace;`; HTML comments, closed
+     or not; any HTML tag outside code (an angle-bracket link like
+     `<https://...>` is fine); every `]:` (any link or footnote definition
+     contains it, however its label is laid out); fences for blocks GitHub
+     draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); text after a
+     code block's language; any `$`, code included, since GitHub draws `$`
+     math in the browser and its API returns math as plain text, so the
+     renderer check can't see it, and what counts as code could be faked;
+     runs of
+     20 or more
+     lines that render empty; images; and a file that isn't valid UTF-8, or
+     is over 512 KB.
+   - **GitHub's own renderer.** In GitHub Actions, each changed file that
+     passes the allow-list is sent to GitHub's Markdown API in `markdown`
+     mode, the renderer behind file and README views. Every word of the
+     file's own text must appear in what GitHub shows, as often as it's
+     written. Only a known code-block language and list numbers are left
+     out. Link addresses count on both sides (written in the file, kept in
+     the page's links), each emoji shortcode must have become an emoji, and
+     the heading anchors GitHub adds don't count, so nothing GitHub shows
+     can stand in for something it hides. The words come from the file, not
+     from a parser, so anything a parser drops is still compared. Math is
+     the exception: GitHub's API returns it as plain text and the browser
+     draws it, so the renderer can't judge it, and the `$` rule above covers
+     it instead. If GitHub ever changes how it renders, this follows, because
+     the answer comes from GitHub. It needs the Action's token (passed by
+     default). Inside Actions without a token it refuses; outside Actions it's
+     skipped and the report says so. Set `githubRender` to `"require"` to
+     refuse outside Actions too, or `"off"` to skip it. Each file has 15
+     seconds and all files together a minute; running out refuses. The
+     allow-list and pattern checks also have a minute in all, across files.
+
+   Code and data files (`.json`, `.yaml`, `.toml`, `.py`, `.ts`, `.sh` and
+   similar), which GitHub shows as raw text, get only the Unicode, padding,
+   encoding and size checks. Other markup GitHub renders with comments of its
+   own (`.rst`, `.adoc`, `.org`, `.textile`, `.svg`, notebooks) is refused:
+   write instructions in Markdown. Any other extension, or none, is treated as
+   Markdown.
+
+   Over-flagging is the safe side, so some harmless lines are refused too: a
+   TypeScript `[key: string]: unknown;` in an example, any `$` (a price, or
+   `$HOME` in a shell example), a time like `10:30:00` (read as an emoji
+   shortcode), `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
+   shortcode GitHub doesn't know. Reword them, or
+   acknowledge them. A finding is refused even with
+   an approval, because the approver may not have seen it, unless an approver
+   signs to say they have:
+   ```bash
+   slipmark attest --kind human --by paul --verdict pass --acknowledge-hidden --subject AGENTS.md --sign
+   ```
+   Acknowledgements count only when `approverSigners` is set and the
+   acknowledging verdict is signed by one of them. Unsigned, anyone opening a
+   pull request could write one, so the report notes it and the gate still
+   refuses. An acknowledgement covers the exact bytes of every subject in that
+   verdict, and the report lists what was acknowledged. The comments
+   `slipmark init` writes (`<!-- slipmark:begin -->`, `<!-- slipmark:end -->`)
+   are always allowed. Unchanged files aren't checked, but once a file is
+   touched, the whole of it is.
 5. **Links and submodules are refused.** A context path that is a link is
    refused as `context_unapproved`, on every run, unless it points at another
    context file in the repo (`CLAUDE.md -> AGENTS.md` is fine; its content is
@@ -343,7 +404,10 @@ lies. To make approval mean something:
 
 - **Require a person on GitHub.** Add the context paths to CODEOWNERS and
   require code owner review in branch protection. GitHub then enforces a human
-  review of any change to them, whatever Slipmark is told.
+  review of any change to them, whatever Slipmark is told. That covers
+  approval, but not hidden text: the code owner reads the same rendered view
+  the hidden text is built to fool. Hidden content is refused regardless,
+  unless a signed acknowledgement says otherwise.
 - **Require a signed approval.** Set `approverSigners` to the identities whose
   [signed verdicts](#signed-verdicts) may approve, for example a workflow that
   only runs after a code owner approves. An approval then counts only if its
@@ -369,11 +433,12 @@ from a subfolder, `attest` and `verify` exit 2.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context |
+| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context. The cost: a nested `pkg/Claude.md` isn't context either |
 | `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
 | `approverSigners` | none | If set, an approval must also be signed by one of these identities |
 | `requireRecorded` | `true` | Verdicts must record their context |
-| `hiddenContent` | `"refuse"` | `"allow"` turns off the hidden-text scan |
+| `hiddenContent` | `"refuse"` | `"allow"` turns off check 4 |
+| `githubRender` | `"auto"` | Check against GitHub's renderer in Actions; `"require"` refuses when it can't run; `"off"` skips it |
 
 Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` and `.claude/` at any depth;
@@ -397,6 +462,16 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
   `.github/workflows/` isn't context; protect workflows with CODEOWNERS.
 - **Deletions.** Deleting a context file is caught by check 2, so verdicts
   must be redone, but it needs no approval under check 3.
+- **Instructions inside other submodules.** A submodule at a context path is
+  refused, but one elsewhere can carry its own AGENTS.md or `.claude/`, which
+  agents load when they work in that folder. Updating it trips no context check.
+- **Text in a link's address.** An inline link's URL shows only on hover. A
+  long or empty-text link (`[](https://...)`) can carry text a reviewer won't
+  read.
+- **Without signing, hidden content can't be waved through.** Legitimate
+  comments or code samples in a changed context file are refused until they're
+  removed, acknowledged by a signed approver, or `hiddenContent` is set to
+  `"allow"` on the base branch.
 
 ## Signed verdicts
 

@@ -2,7 +2,7 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-25T14:32:08.467Z",
+  "at": "2026-10-25T18:44:45.834Z",
   "subjects": [
     {
       "path": "src/attest/signing.ts",
@@ -15,8 +15,8 @@
   "against": [
     {
       "path": "docs/attestation.md",
-      "sha256": "3752b18b9857076c2c1aa90a4ef815e94aa53ebd8642bc0706a48b55ce414a63"
+      "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
     }
   ],
-  "note": "Signed verdicts section matches signing.ts: DSSE over canonical JSON minus signature, payload check, issuer default and signatures.issuer, * identity match, invalid always refuses, unreachable Sigstore exits 2 only when required."
+  "note": "Signing docs still match: canonical payload minus signature, which covers acknowledgedHidden; acknowledgements count only when signed by approverSigners"
 }
