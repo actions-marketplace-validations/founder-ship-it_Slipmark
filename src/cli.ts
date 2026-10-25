@@ -311,7 +311,7 @@ async function attestMain(args: string[]): Promise<void> {
     } catch {
       ctxPolicy = undefined; // verify reports a malformed policy; attest still records the verdict
     }
-    if (args.includes("--context") || (ctxPolicy && (kind ?? "agent") === "agent")) context = ctxPolicy?.files ?? true;
+    if (args.includes("--context") || (ctxPolicy && (kind ?? "agent") !== "human")) context = ctxPolicy?.files ?? true;
   }
   let att;
   try {
