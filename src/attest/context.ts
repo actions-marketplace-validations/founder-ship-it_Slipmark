@@ -16,7 +16,7 @@
  */
 
 /** Where coding agents read their instructions and tools from. Override with `context.files` in the policy. */
-import { marked, type Token, type Tokens } from "marked";
+import { Lexer, Tokenizer } from "marked";
 
 export const DEFAULT_CONTEXT_FILES = [
   // Instruction files, at any depth
@@ -77,54 +77,59 @@ const INVISIBLE =
 const RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 
 const BLANK_RUN = 20;
+/** Changed context files larger than this are refused rather than scanned. */
+export const MAX_SCAN = 512 * 1024;
 
 const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 
 const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toLowerCase();
 
-/** Every link reference definition in a Markdown document, with whether a link or image uses it. */
-export function linkDefinitions(body: string): { label: string; href: string; title?: string; used: boolean; commentLike: boolean; line: number }[] {
-  let tokens: ReturnType<typeof marked.lexer>;
+/**
+ * Every link reference definition in a Markdown document, in order, including
+ * repeats of a label (the parser keeps only the first, so later ones render as
+ * nothing at all). Block-level parsing only: definitions are blocks, and
+ * skipping inline parsing keeps a hostile file from stalling the gate.
+ */
+export function linkDefinitions(body: string): { label: string; href: string; title?: string; used: boolean; duplicate: boolean; commentLike: boolean; line: number }[] {
+  const found: { label: string; href: string; title?: string; raw: string }[] = [];
+  // Record each definition as the parser reads it, through the public Tokenizer option.
+  const tokenizer = new Tokenizer();
+  const def = tokenizer.def.bind(tokenizer);
+  tokenizer.def = (src: string) => {
+    const t = def(src);
+    if (t) found.push({ label: t.tag, href: t.href ?? "", ...(t.title ? { title: t.title } : {}), raw: t.raw });
+    return t;
+  };
+  const lexer = new Lexer({ tokenizer });
   try {
-    tokens = marked.lexer(body);
+    lexer.blockTokens(body, []);
   } catch {
     return [];
   }
-  const used = new Set<string>();
-  const walk = (list: Token[] | undefined) => {
-    for (const t of list ?? []) {
-      if (t.type === "link" || t.type === "image") {
-        const raw = (t as Tokens.Link).raw;
-        // [text][label], [label][] or the shortcut [label]: the label is the last bracketed group, or the text.
-        const full = /\]\[((?:\\.|[^\]\\])*)\]$/.exec(raw);
-        const shortcut = /^!?\[((?:\\.|[^\]\\])*)\](?:\[\])?$/.exec(raw);
-        const label = full && full[1] ? full[1] : shortcut ? shortcut[1] : null;
-        if (label) used.add(normLabel(label));
-      }
-      const anyT = t as { tokens?: Token[]; items?: { tokens?: Token[] }[]; rows?: { tokens?: Token[] }[][]; header?: { tokens?: Token[] }[] };
-      walk(anyT.tokens);
-      for (const item of anyT.items ?? []) walk(item.tokens);
-      for (const cell of anyT.header ?? []) walk(cell.tokens);
-      for (const row of anyT.rows ?? []) for (const cell of row) walk(cell.tokens);
-    }
+  // A label is used when the rest of the text has [text][label], [label][] or a shortcut [label].
+  let rest = body;
+  for (const f of found) rest = rest.replace(f.raw, "");
+  const used = (label: string) => {
+    const l = normLabel(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
+    return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[:])`, "i").test(rest);
   };
-  walk(tokens);
   const lines = body.split("\n");
-  const lineOfLabel = (label: string) => {
-    const needle = `[${label}]:`.toLowerCase();
-    const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
-    return i >= 0 ? i + 1 : 1;
-  };
-  return Object.entries(tokens.links ?? {}).map(([label, def]) => {
-    const href = (def as { href?: string }).href ?? "";
-    const title = (def as { title?: string }).title || undefined;
+  const seen = new Map<string, number>();
+  return found.map((f) => {
+    const key = normLabel(f.label);
+    const count = seen.get(key) ?? 0;
+    seen.set(key, count + 1);
+    const firstLine = f.raw.split("\n").find((l) => l.trim()) ?? f.raw;
+    const at = lines.findIndex((l) => l.includes(firstLine.trim()));
+    const isUsed = used(f.label);
     return {
-      label,
-      href,
-      ...(title ? { title } : {}),
-      used: used.has(normLabel(label)),
-      line: lineOfLabel(label),
-      commentLike: href === "" || href === "#" || href === "<>" || label.trim().startsWith("//") || (href.startsWith("#") && !used.has(normLabel(label))),
+      label: f.label,
+      href: f.href,
+      ...(f.title ? { title: f.title } : {}),
+      used: isUsed,
+      duplicate: count > 0,
+      line: at >= 0 ? at + 1 : 1,
+      commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || (f.href.startsWith("#") && !isUsed),
     };
   });
 }
@@ -141,6 +146,9 @@ const lineOf = (text: string, index: number) => text.slice(0, index).split("\n")
  */
 export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
   const out: HiddenFinding[] = [];
+  if (text.length > MAX_SCAN) {
+    return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
+  }
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // a leading byte-order mark is harmless
   const lines = body.split(/\r?\n/);
   let blankStart = -1;
@@ -178,7 +186,9 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     // bracket, with the title on the next line). A Markdown parser finds them all. Flag one used as a comment
     // ([//]: # (...)), one with a title (shown only as a tooltip), or one no link uses.
     for (const d of linkDefinitions(body)) {
-      const why = d.commentLike
+      const why = d.duplicate
+        ? "Markdown reference defined again: only the first counts, this one renders as nothing"
+        : d.commentLike
         ? "Markdown reference used as a comment"
         : d.title
           ? "Markdown reference with a title, shown only on hover"

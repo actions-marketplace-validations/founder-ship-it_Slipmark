@@ -2193,55 +2193,56 @@ var DEFAULT_CONTEXT_FILES = [
 var INVISIBLE = /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 var BLANK_RUN = 20;
+var MAX_SCAN = 512 * 1024;
 var isMarkdownish = (path) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 var normLabel = (l) => l.trim().replace(/\s+/g, " ").toLowerCase();
 function linkDefinitions(body) {
-  let tokens;
+  const found = [];
+  const tokenizer = new _Tokenizer();
+  const def2 = tokenizer.def.bind(tokenizer);
+  tokenizer.def = (src) => {
+    const t = def2(src);
+    if (t) found.push({ label: t.tag, href: t.href ?? "", ...t.title ? { title: t.title } : {}, raw: t.raw });
+    return t;
+  };
+  const lexer2 = new _Lexer({ tokenizer });
   try {
-    tokens = marked.lexer(body);
+    lexer2.blockTokens(body, []);
   } catch {
     return [];
   }
-  const used = /* @__PURE__ */ new Set();
-  const walk = (list2) => {
-    for (const t of list2 ?? []) {
-      if (t.type === "link" || t.type === "image") {
-        const raw = t.raw;
-        const full = /\]\[((?:\\.|[^\]\\])*)\]$/.exec(raw);
-        const shortcut = /^!?\[((?:\\.|[^\]\\])*)\](?:\[\])?$/.exec(raw);
-        const label = full && full[1] ? full[1] : shortcut ? shortcut[1] : null;
-        if (label) used.add(normLabel(label));
-      }
-      const anyT = t;
-      walk(anyT.tokens);
-      for (const item of anyT.items ?? []) walk(item.tokens);
-      for (const cell of anyT.header ?? []) walk(cell.tokens);
-      for (const row of anyT.rows ?? []) for (const cell of row) walk(cell.tokens);
-    }
+  let rest = body;
+  for (const f of found) rest = rest.replace(f.raw, "");
+  const used = (label) => {
+    const l = normLabel(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
+    return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[:])`, "i").test(rest);
   };
-  walk(tokens);
   const lines = body.split("\n");
-  const lineOfLabel = (label) => {
-    const needle = `[${label}]:`.toLowerCase();
-    const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
-    return i >= 0 ? i + 1 : 1;
-  };
-  return Object.entries(tokens.links ?? {}).map(([label, def2]) => {
-    const href = def2.href ?? "";
-    const title = def2.title || void 0;
+  const seen = /* @__PURE__ */ new Map();
+  return found.map((f) => {
+    const key = normLabel(f.label);
+    const count = seen.get(key) ?? 0;
+    seen.set(key, count + 1);
+    const firstLine = f.raw.split("\n").find((l) => l.trim()) ?? f.raw;
+    const at = lines.findIndex((l) => l.includes(firstLine.trim()));
+    const isUsed = used(f.label);
     return {
-      label,
-      href,
-      ...title ? { title } : {},
-      used: used.has(normLabel(label)),
-      line: lineOfLabel(label),
-      commentLike: href === "" || href === "#" || href === "<>" || label.trim().startsWith("//") || href.startsWith("#") && !used.has(normLabel(label))
+      label: f.label,
+      href: f.href,
+      ...f.title ? { title: f.title } : {},
+      used: isUsed,
+      duplicate: count > 0,
+      line: at >= 0 ? at + 1 : 1,
+      commentLike: f.href === "" || f.href === "#" || f.href === "<>" || f.label.trim().startsWith("//") || f.href.startsWith("#") && !isUsed
     };
   });
 }
 var lineOf = (text, index) => text.slice(0, index).split("\n").length;
 function scanHiddenContent(path, text) {
   const out2 = [];
+  if (text.length > MAX_SCAN) {
+    return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
+  }
   const body = text.charCodeAt(0) === 65279 ? text.slice(1) : text;
   const lines = body.split(/\r?\n/);
   let blankStart = -1;
@@ -2280,7 +2281,7 @@ function scanHiddenContent(path, text) {
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
     for (const d of linkDefinitions(body)) {
-      const why = d.commentLike ? "Markdown reference used as a comment" : d.title ? "Markdown reference with a title, shown only on hover" : !d.used ? "Markdown reference no link uses" : null;
+      const why = d.duplicate ? "Markdown reference defined again: only the first counts, this one renders as nothing" : d.commentLike ? "Markdown reference used as a comment" : d.title ? "Markdown reference with a title, shown only on hover" : !d.used ? "Markdown reference no link uses" : null;
       if (why) out2.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
     }
     const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
