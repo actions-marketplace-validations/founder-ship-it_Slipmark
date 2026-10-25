@@ -181,14 +181,13 @@ function scanHiddenContent(path, text) {
       if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
     }
-    const mathLine = /^[^\n]*(?:\$\$|\$`|\$[^\n]*\$)[^\n]*$/gm;
-    for (let m = mathLine.exec(prose); m; m = mathLine.exec(prose)) {
-      if (out2.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) {
-        mathLine.lastIndex++;
-        continue;
+    {
+      const proseLines = prose.split("\n");
+      for (let i = 0; i < proseLines.length && out2.length < MAX_FINDINGS; i++) {
+        if (proseLines[i].includes("$")) {
+          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a $ outside code: GitHub may draw it as math, which can show text as blank space. Put commands and prices in `code`, or acknowledge it" });
+        }
       }
-      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "math, which GitHub draws and can show as blank space. Agent instructions don't need it" });
     }
     const namedInvisible = /&(?:ZeroWidthSpace|NegativeVeryThinSpace|NegativeThinSpace|NegativeMediumSpace|NegativeThickSpace|zwj|zwnj|shy|lrm|rlm|NoBreak|InvisibleTimes|InvisibleComma|it|ic|af|ApplyFunction|ii|dd|DD|ee|lre|rle|lro|rlo|pdf|nbsp);/g;
     for (let m = namedInvisible.exec(body); m; m = namedInvisible.exec(body)) {
@@ -206,14 +205,6 @@ function scanHiddenContent(path, text) {
         out2.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
       }
       INVISIBLE.lastIndex = 0;
-    }
-    if (prose.includes("$")) {
-      const lines2 = prose.split(/\r\n?|\n/);
-      for (let i = 0; i < lines2.length && out2.length < MAX_FINDINGS; i++) {
-        if (lines2[i].includes("%")) {
-          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });
-        }
-      }
     }
     const inlineTitle = /\]\([ \t\n]*(?:<[^>\n]*>|[^\s()<]+)[ \t\n]+["'(]/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {

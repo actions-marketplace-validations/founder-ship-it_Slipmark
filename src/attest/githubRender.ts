@@ -56,7 +56,8 @@ const EMOJI = "\uE000";
 export function visibleText(html: string): string {
   return decodeEntities(
     html
-      // Math is drawn by the browser, and TeX can draw text as blank space: its source doesn't count as visible.
+      // Math, if GitHub ever returns it as an element, is drawn by the browser: its source doesn't count as visible.
+      // Today the API returns math as plain text, so math is refused by the pattern checks (any $ outside code).
       .replace(/<(script|style|template|math-renderer|math)\b[\s\S]*?<\/\1\s*>/gi, " ")
       .replace(/<!--[\s\S]*?-->/g, " ")
       // A link's address counts as shown (on hover), matching the source, where it's written. Heading anchors

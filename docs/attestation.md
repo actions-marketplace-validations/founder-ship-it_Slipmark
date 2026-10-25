@@ -336,9 +336,10 @@ That's enough to start. With it:
      `<https://...>` is fine); every `]:` (any link or footnote definition
      contains it, however its label is laid out); fences for blocks GitHub
      draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); text after a
-     code block's language; math on a line (two `$`, `$$` or ``$` ``), and,
-     in a file with a `$` anywhere, every line with a `%` (both outside code,
-     where GitHub doesn't render math); runs of 20 or more
+     code block's language; any `$` outside code, since GitHub draws `$`
+     math in the browser and its API returns math as plain text, so the
+     renderer check can't see it (put commands and prices in `code`); runs of
+     20 or more
      lines that render empty; images; and a file that isn't valid UTF-8, or
      is over 512 KB.
    - **GitHub's own renderer.** In GitHub Actions, each changed file that
@@ -350,9 +351,10 @@ That's enough to start. With it:
      the page's links), each emoji shortcode must have become an emoji, and
      the heading anchors GitHub adds don't count, so nothing GitHub shows
      can stand in for something it hides. The words come from the file, not
-     from a parser, so anything a parser drops is still compared. Math
-     counts as not shown, since the browser draws it; CI checks GitHub still
-     renders math the way this assumes. If GitHub ever changes how it renders, this follows, because
+     from a parser, so anything a parser drops is still compared. Math is
+     the exception: GitHub's API returns it as plain text and the browser
+     draws it, so the renderer can't judge it, and the `$` rule above covers
+     it instead. If GitHub ever changes how it renders, this follows, because
      the answer comes from GitHub. It needs the Action's token (passed by
      default). Inside Actions without a token it refuses; outside Actions it's
      skipped and the report says so. Set `githubRender` to `"require"` to
@@ -368,8 +370,8 @@ That's enough to start. With it:
    Markdown.
 
    Over-flagging is the safe side, so some harmless lines are refused too: a
-   TypeScript `[key: string]: unknown;` in an example, "costs $5 or $10" in
-   prose, `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
+   TypeScript `[key: string]: unknown;` in an example, "costs $5" in prose
+   (write `$5`), `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
    shortcode GitHub doesn't know. Reword them, or
    acknowledge them. A finding is refused even with
    an approval, because the approver may not have seen it, unless an approver
@@ -461,9 +463,6 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 - **Instructions inside other submodules.** A submodule at a context path is
   refused, but one elsewhere can carry its own AGENTS.md or `.claude/`, which
   agents load when they work in that folder. Updating it trips no context check.
-- **Math spread over lines, without GitHub's renderer.** Locally, math is
-  caught only when it opens on one line (two `$`, `$$`, ``$` ``); math that
-  runs over a line break is caught by the renderer check in Actions.
 - **Text in a link's address.** An inline link's URL shows only on hover. A
   long or empty-text link (`[](https://...)`) can carry text a reviewer won't
   read.

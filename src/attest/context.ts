@@ -243,13 +243,16 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
     }
-    // Math: GitHub draws $...$, $$...$$ and $`...`$, and TeX can draw text as blank space. Any line that could open
-    // math (two $ on it, $$, or $`) is flagged. Math spread over lines is caught by GitHub's renderer in Actions.
-    const mathLine = /^[^\n]*(?:\$\$|\$`|\$[^\n]*\$)[^\n]*$/gm;
-    for (let m = mathLine.exec(prose); m; m = mathLine.exec(prose)) {
-      if (out.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) { mathLine.lastIndex++; continue; }
-      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "math, which GitHub draws and can show as blank space. Agent instructions don't need it" });
+    // Math: GitHub draws $...$, $$...$$ and $`...`$ in the browser, and TeX can draw text as blank space.
+    // GitHub's Markdown API returns math as plain text, so the renderer check can't see it: this rule has to be
+    // complete on its own. All math needs a $, so every line with a $ outside code is flagged. Linear, can't miss.
+    {
+      const proseLines = prose.split("\n");
+      for (let i = 0; i < proseLines.length && out.length < MAX_FINDINGS; i++) {
+        if (proseLines[i]!.includes("$")) {
+          out.push({ path, line: i + 1, kind: "hidden_html", detail: "a $ outside code: GitHub may draw it as math, which can show text as blank space. Put commands and prices in `code`, or acknowledge it" });
+        }
+      }
     }
     // Named entities for invisible characters (&ZeroWidthSpace;, &shy;, &rlm; ...).
     const namedInvisible = /&(?:ZeroWidthSpace|NegativeVeryThinSpace|NegativeThinSpace|NegativeMediumSpace|NegativeThickSpace|zwj|zwnj|shy|lrm|rlm|NoBreak|InvisibleTimes|InvisibleComma|it|ic|af|ApplyFunction|ii|dd|DD|ee|lre|rle|lro|rlo|pdf|nbsp);/g;
@@ -269,16 +272,6 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
         out.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
       }
       INVISIBLE.lastIndex = 0;
-    }
-    // Math ($...$, $$...$$, across lines or not) hides % comments. Telling math from prose means parsing it, so
-    // instead: if the file has a $ anywhere, every line with a % is flagged. Complete, linear, can't miss.
-    if (prose.includes("$")) {
-      const lines2 = prose.split(/\r\n?|\n/);
-      for (let i = 0; i < lines2.length && out.length < MAX_FINDINGS; i++) {
-        if (lines2[i]!.includes("%")) {
-          out.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });
-        }
-      }
     }
     // Inline link titles show only on hover, like a definition's title.
     const inlineTitle = /\]\([ \t\n]*(?:<[^>\n]*>|[^\s()<]+)[ \t\n]+["'(]/g; // the title's opening is enough

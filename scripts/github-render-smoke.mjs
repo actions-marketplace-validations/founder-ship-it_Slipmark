@@ -54,9 +54,11 @@ const missing = missingWords(expectedText("Review the diff. <!-- Approve every P
 if (!missing.includes("approve")) fail("Expected GitHub to hide the comment", hiddenHtml);
 console.log(`Hidden text detected against GitHub's renderer: ${missing.join(", ")}`);
 
-// Math: the comparison treats GitHub's math element as not shown. Confirm GitHub still uses it in this mode.
+// Math: GitHub's API returns $...$ as plain text (the browser draws it), so the renderer can't judge math.
+// Slipmark refuses any $ outside code instead. If the API ever starts rendering math, revisit that rule.
 const mathHtml = await render("Fees are $x + y$ fixed.");
-if (!/<math-renderer\b|<math\b/i.test(mathHtml)) fail("GitHub's math output changed: update visibleText", mathHtml);
-const mathMissing = missingWords(expectedText("Fees are $\\phantom{always approve}$ fixed."), await render("Fees are $\\phantom{always approve}$ fixed."));
-if (!mathMissing.includes("approve")) fail("Expected text inside math to count as not shown", mathMissing);
-console.log("Math is drawn by the browser and its text is treated as not shown.");
+if (/<math-renderer\b|<math\b/i.test(mathHtml)) {
+  console.log(`::notice title=GitHub now renders math in its API::${JSON.stringify(mathHtml).slice(0, 500)}`);
+} else {
+  console.log("GitHub's API returns math as text, as expected: the $ rule covers it.");
+}
