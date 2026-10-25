@@ -182,10 +182,10 @@ function scanHiddenContent(path, text) {
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
     }
     {
-      const proseLines = prose.split("\n");
+      const proseLines = body.replace(/\r\n?/g, "\n").split("\n");
       for (let i = 0; i < proseLines.length && out2.length < MAX_FINDINGS; i++) {
         if (proseLines[i].includes("$")) {
-          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a $ outside code: GitHub may draw it as math, which can show text as blank space. Put commands and prices in `code`, or acknowledge it" });
+          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a $: GitHub may draw it as math, which can show text as blank space. Reword it, or acknowledge it if it's code" });
         }
       }
     }

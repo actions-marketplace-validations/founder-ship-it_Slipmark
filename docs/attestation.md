@@ -336,9 +336,10 @@ That's enough to start. With it:
      `<https://...>` is fine); every `]:` (any link or footnote definition
      contains it, however its label is laid out); fences for blocks GitHub
      draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); text after a
-     code block's language; any `$` outside code, since GitHub draws `$`
+     code block's language; any `$`, code included, since GitHub draws `$`
      math in the browser and its API returns math as plain text, so the
-     renderer check can't see it (put commands and prices in `code`); runs of
+     renderer check can't see it, and what counts as code could be faked;
+     runs of
      20 or more
      lines that render empty; images; and a file that isn't valid UTF-8, or
      is over 512 KB.
@@ -370,8 +371,9 @@ That's enough to start. With it:
    Markdown.
 
    Over-flagging is the safe side, so some harmless lines are refused too: a
-   TypeScript `[key: string]: unknown;` in an example, "costs $5" in prose
-   (write `$5`), `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
+   TypeScript `[key: string]: unknown;` in an example, any `$` (a price, or
+   `$HOME` in a shell example), a time like `10:30:00` (read as an emoji
+   shortcode), `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
    shortcode GitHub doesn't know. Reword them, or
    acknowledge them. A finding is refused even with
    an approval, because the approver may not have seen it, unless an approver

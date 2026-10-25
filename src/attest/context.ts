@@ -245,12 +245,13 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     }
     // Math: GitHub draws $...$, $$...$$ and $`...`$ in the browser, and TeX can draw text as blank space.
     // GitHub's Markdown API returns math as plain text, so the renderer check can't see it: this rule has to be
-    // complete on its own. All math needs a $, so every line with a $ outside code is flagged. Linear, can't miss.
+    // complete on its own. All math needs a $, so every line with a $ is flagged, code included: deciding what is
+    // code would mean trusting a guess that a crafted file can fool. Linear, can't miss.
     {
-      const proseLines = prose.split("\n");
+      const proseLines = body.replace(/\r\n?/g, "\n").split("\n");
       for (let i = 0; i < proseLines.length && out.length < MAX_FINDINGS; i++) {
         if (proseLines[i]!.includes("$")) {
-          out.push({ path, line: i + 1, kind: "hidden_html", detail: "a $ outside code: GitHub may draw it as math, which can show text as blank space. Put commands and prices in `code`, or acknowledge it" });
+          out.push({ path, line: i + 1, kind: "hidden_html", detail: "a $: GitHub may draw it as math, which can show text as blank space. Reword it, or acknowledge it if it's code" });
         }
       }
     }
