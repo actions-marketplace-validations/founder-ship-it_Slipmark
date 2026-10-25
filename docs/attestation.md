@@ -323,8 +323,10 @@ That's enough to start. With it:
    (`[label]: url`) and footnote definitions (`[^note]: text`), found with a
    Markdown parser wherever they sit (in a quote or a list, with an escaped
    label, with the title on the next line), plus a deliberately broad check for
-   any line that looks like one, because parsers disagree at the edges (tabs,
-   a quote continued without `>`). Every one is flagged, used or not: a definition never renders, so text can
+   anything that looks like one, because parsers disagree at the edges (tabs,
+   a quote continued without `>`, a label split across lines). The broad check
+   also fires inside code blocks, for example on a TypeScript
+   `[key: string]: unknown;` line; acknowledge it (below) if so. Every one is flagged, used or not: a definition never renders, so text can
    hide in its label, address or title. Write links inline (`[text](url)`)
    instead. Also flagged: a link title, which shows only on hover; runs of 20
    or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
@@ -333,7 +335,13 @@ That's enough to start. With it:
    only looked for in prose files (Markdown, MDX, text, no extension), because
    GitHub shows JSON and YAML as raw text. Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
-   not have seen it. Unchanged files aren't scanned, but once a file is
+   not have seen it, unless the approver says they have:
+   ```bash
+   slipmark attest --kind human --by paul --verdict pass --acknowledge-hidden --subject AGENTS.md
+   ```
+   An acknowledgement covers those exact bytes only, and the report still
+   lists what was acknowledged. The comments `slipmark init` writes
+   (`<!-- slipmark:begin -->`, `<!-- slipmark:end -->`) are never flagged. Unchanged files aren't scanned, but once a file is
    touched, an old comment in it counts too.
 5. **Links and submodules are refused.** A context path that is a link is
    refused as `context_unapproved`, on every run, unless it points at another
@@ -410,9 +418,9 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 - **Text in a link's address.** An inline link's URL shows only on hover. A
   long or empty-text link (`[](https://...)`) can carry text a reviewer won't
   read.
-- **Single findings can't be approved.** A legitimate image, comment or link
-  title in a changed context file is refused until it's removed or
-  `hiddenContent` is set to `"allow"` on the base branch.
+- **Acknowledgements are as strong as approvals.** `--acknowledge-hidden` is
+  recorded on a verdict, so, like `kind`, it's a claim unless you require
+  signed approvals with `approverSigners`.
 
 ## Signed verdicts
 

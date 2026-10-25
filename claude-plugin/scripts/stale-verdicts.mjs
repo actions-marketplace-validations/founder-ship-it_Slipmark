@@ -2193,6 +2193,7 @@ var DEFAULT_CONTEXT_FILES = [
 var INVISIBLE = /[\u001B\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 var BLANK_RUN = 20;
+var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 var MAX_SCAN = 512 * 1024;
 var MAX_FINDINGS = 50;
 var isMarkdownish = (path) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
@@ -2270,6 +2271,7 @@ function scanHiddenContent(path, text) {
       }
       const closed = m[0].endsWith("-->");
       if (closed && m[1].trim() === "") continue;
+      if (closed && ALLOWED_COMMENTS.has(m[0])) continue;
       out2.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
     const rawHtml = /<\?|<![A-Za-z]|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
@@ -2288,8 +2290,8 @@ function scanHiddenContent(path, text) {
       const why = d.label.startsWith("^") ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out2.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
-    const looksLikeDef = /^[ \t>*+\-0-9.)]*\[(\^?)(?:\\.|[^\]\\\n])+\]:/gm;
-    const lf = body.replace(/\r\n?/g, "\n");
+    const lf = body.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/^[ \t>*+\-0-9.)]*/, "")).join("\n");
+    const looksLikeDef = /^\[(\^?)(?:\\[\s\S]|[^\]\\\n]|\n(?![ \t]*\n)){1,999}\]:/gm;
     for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
       if (out2.length >= MAX_FINDINGS) break;
       const line = lineOf(lf, m.index);
@@ -2467,6 +2469,7 @@ function isAttestation(v) {
   if (a.against !== void 0 && !isSubjectList(a.against, true)) return false;
   if (a.checks !== void 0 && !isCheckList(a.checks)) return false;
   if (a.context !== void 0 && !isSubjectList(a.context, true)) return false;
+  if (a.acknowledgedHidden !== void 0 && a.acknowledgedHidden !== true) return false;
   if (a.kind !== void 0 && !["agent", "tool", "human"].includes(a.kind)) return false;
   if (a.agent !== void 0) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -2752,7 +2755,7 @@ function verifyCore(opts) {
       }
       covered.add(relKey);
       if (!coveredBy.has(relKey)) coveredBy.set(relKey, []);
-      coveredBy.get(relKey).push({ kind: att.kind ?? "agent", ...sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {} });
+      coveredBy.get(relKey).push({ kind: att.kind ?? "agent", by: att.by, ackHidden: att.acknowledgedHidden === true, ...sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {} });
       results.push({ ...base, status: "verified", ...signer ? { signer } : {}, message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
@@ -2794,9 +2797,10 @@ function verifyCore(opts) {
     } else {
       const approvers = ctxPolicy.approvers ?? ["human"];
       const signers = ctxPolicy.approverSigners;
-      const approved = (path) => (coveredBy.get(path) ?? []).some(
+      const approvals = (path) => (coveredBy.get(path) ?? []).filter(
         (v) => approvers.includes(v.kind) && (!signers || v.signedBy !== void 0 && signers.some((p) => identityMatches(v.signedBy, p)))
       );
+      const approved = (path) => approvals(path).length > 0;
       const problemPaths = new Set(contextProblems.map((p) => p.path));
       for (const f of changedFiles(root, ctxBase, "agent context")) {
         const path = toPosix(f);
@@ -2819,10 +2823,15 @@ function verifyCore(opts) {
           const findings = text === null ? [{ path, line: 1, kind: "invisible_characters", detail: "not valid UTF-8, so its text can't be checked" }] : scanHiddenContent(path, text);
           if (findings.length) {
             const list2 = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            const ack = approvals(path).find((v) => v.ackHidden);
+            if (ack) {
+              notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
+              continue;
+            }
             results.push({
               status: "hidden_content",
               subject: path,
-              message: `${path} is agent context with text a reviewer may not see (${list2}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or set context.hiddenContent to "allow" on the base branch.`
+              message: `${path} is agent context with text a reviewer may not see (${list2}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or, if you've read it and accept it: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --subject ${path}`
             });
           }
         }

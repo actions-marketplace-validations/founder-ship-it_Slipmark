@@ -77,6 +77,9 @@ const INVISIBLE =
 const RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s*\/?>|[\u00A0\u2800\u3164\u115F\u1160\uFFA0\u200B-\u200D\u2060\uFEFF])*$/i;
 
 const BLANK_RUN = 20;
+/** Comments Slipmark itself writes (`slipmark init` fences its block in AGENTS.md with these). Exact text only. */
+const ALLOWED_COMMENTS = new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
+
 /** Changed context files larger than this are refused rather than scanned. */
 export const MAX_SCAN = 512 * 1024;
 /** Enough to refuse and to show the reader; stops a file of a million comments costing a million line counts. */
@@ -179,6 +182,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (m[0].length === 0) { comment.lastIndex++; continue; }
       const closed = m[0].endsWith("-->");
       if (closed && m[1]!.trim() === "") continue;
+      if (closed && ALLOWED_COMMENTS.has(m[0])) continue;
       out.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
     // Raw HTML GitHub strips or doesn't show: processing instructions, declarations, CDATA, script and style.
@@ -205,8 +209,15 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
           : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
-    const looksLikeDef = /^[ \t>*+\-0-9.)]*\[(\^?)(?:\\.|[^\]\\\n])+\]:/gm;
-    const lf = body.replace(/\r\n?/g, "\n"); // same line numbers as the parser's
+    // Container markers (quotes, list bullets) are stripped from every line first, one line for one line, so
+    // a label that starts after "> " and ends on an unquoted next line is still seen. A label may run across
+    // lines but not a blank line, and is at most 999 characters, as in CommonMark; that bound keeps it linear.
+    const lf = body
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((l) => l.replace(/^[ \t>*+\-0-9.)]*/, ""))
+      .join("\n");
+    const looksLikeDef = /^\[(\^?)(?:\\[\s\S]|[^\]\\\n]|\n(?![ \t]*\n)){1,999}\]:/gm;
     for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
       if (out.length >= MAX_FINDINGS) break;
       const line = lineOf(lf, m.index);

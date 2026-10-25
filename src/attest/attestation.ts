@@ -92,6 +92,12 @@ export interface Attestation {
    * was recorded. If any of them changes, the verdict stops counting.
    */
   context?: AttestedSubject[];
+  /**
+   * v2. The approver has seen text in these exact files that GitHub doesn't
+   * display (comments, link definitions, images) and accepts it. Lets a context
+   * change with such content through when given by an allowed approver.
+   */
+  acknowledgedHidden?: true;
   /** Sigstore signature over the rest of the attestation, made where the verdict was given. See signing.ts. */
   signature?: AttestationSignature;
 }
@@ -281,6 +287,8 @@ export function createAttestation(opts: {
   agent?: AgentInfo;
   /** Record the agent context: true for the default context files, or a list of globs. */
   context?: boolean | string[];
+  /** The attester has read the hidden content in these files and accepts it. */
+  acknowledgeHidden?: boolean;
   /** Test hook: replaces runCheck. */
   runner?: (root: string, command: string) => AttestedCheck;
 }): Attestation {
@@ -309,7 +317,7 @@ export function createAttestation(opts: {
   if (opts.agent?.harness) agent.harness = opts.agent.harness;
   if (opts.agent?.harnessVersion) agent.harnessVersion = opts.agent.harnessVersion;
   const context = opts.context ? contextDigests(root, opts.context === true ? DEFAULT_CONTEXT_FILES : opts.context) : undefined;
-  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined;
+  const v2 = against.length > 0 || checks.length > 0 || Object.keys(agent).length > 0 || opts.kind !== undefined || context !== undefined || !!opts.acknowledgeHidden;
 
   const att: Attestation = {
     schema: v2 ? ATTESTATION_SCHEMA_V2 : ATTESTATION_SCHEMA,
@@ -323,6 +331,7 @@ export function createAttestation(opts: {
   if (against.length > 0) att.against = against;
   if (checks.length > 0) att.checks = checks;
   if (context !== undefined) att.context = context;
+  if (opts.acknowledgeHidden) att.acknowledgedHidden = true;
   if (opts.note) att.note = opts.note;
   return att;
 }
@@ -511,6 +520,7 @@ function isAttestation(v: unknown): v is Attestation {
   if (a.against !== undefined && !isSubjectList(a.against, true)) return false;
   if (a.checks !== undefined && !isCheckList(a.checks)) return false;
   if (a.context !== undefined && !isSubjectList(a.context, true)) return false;
+  if (a.acknowledgedHidden !== undefined && a.acknowledgedHidden !== true) return false;
   if (a.kind !== undefined && !["agent", "tool", "human"].includes(a.kind as string)) return false;
   if (a.agent !== undefined) {
     if (!a.agent || typeof a.agent !== "object") return false;
@@ -855,7 +865,7 @@ function verifyCore(opts: {
   const currentContext = ctxPolicy ? new Map(contextDigests(root, ctxGlobs).map((c) => [c.path, c.sha256])) : null;
   const contextProblems = ctxPolicy ? scanContext(root, ctxGlobs).problems : [];
   /** Who gave a current, passing verdict on each path: its claimed kind, and its signer when the signature is valid. */
-  const coveredBy = new Map<string, { kind: AttesterKind; signedBy?: string }[]>();
+  const coveredBy = new Map<string, { kind: AttesterKind; signedBy?: string; by: string; ackHidden: boolean }[]>();
   const required = [...new Set([...(opts.require ?? []), ...(policy?.require ?? [])])];
   const results: CheckResult[] = [];
   const covered = new Set<string>();
@@ -992,7 +1002,7 @@ function verifyCore(opts: {
       }
       covered.add(relKey);
       if (!coveredBy.has(relKey)) coveredBy.set(relKey, []);
-      coveredBy.get(relKey)!.push({ kind: att.kind ?? "agent", ...(sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {}) });
+      coveredBy.get(relKey)!.push({ kind: att.kind ?? "agent", by: att.by, ackHidden: att.acknowledgedHidden === true, ...(sigCheck?.state === "valid" ? { signedBy: sigCheck.identity } : {}) });
       results.push({ ...base, status: "verified", ...(signer ? { signer } : {}), message: `${att.by} verified ${s.path}${signer ? ` (signed by ${signer})` : ""}` });
     }
   }
@@ -1043,10 +1053,11 @@ function verifyCore(opts: {
     } else {
       const approvers = ctxPolicy.approvers ?? ["human"];
       const signers = ctxPolicy.approverSigners;
-      const approved = (path: string) =>
-        (coveredBy.get(path) ?? []).some(
+      const approvals = (path: string) =>
+        (coveredBy.get(path) ?? []).filter(
           (v) => approvers.includes(v.kind) && (!signers || (v.signedBy !== undefined && signers.some((p) => identityMatches(v.signedBy!, p)))),
         );
+      const approved = (path: string) => approvals(path).length > 0;
       const problemPaths = new Set(contextProblems.map((p) => p.path));
       for (const f of changedFiles(root, ctxBase, "agent context")) {
         const path = toPosix(f);
@@ -1072,10 +1083,15 @@ function verifyCore(opts: {
               : scanHiddenContent(path, text);
           if (findings.length) {
             const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
+            const ack = approvals(path).find((v) => v.ackHidden);
+            if (ack) {
+              notes.push(`${path}: ${findings.length} piece(s) of hidden content acknowledged by ${ack.by}: ${findings.slice(0, 3).map((h) => `line ${h.line}`).join(", ")}`);
+              continue;
+            }
             results.push({
               status: "hidden_content",
               subject: path,
-              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or set context.hiddenContent to "allow" on the base branch.`,
+              message: `${path} is agent context with text a reviewer may not see (${list}${findings.length > 5 ? `, and ${findings.length - 5} more` : ""}). Remove it, or, if you've read it and accept it: slipmark attest --kind ${(ctxPolicy.approvers ?? ["human"])[0]} --by <you> --verdict pass --acknowledge-hidden --subject ${path}`,
             });
           }
         }
