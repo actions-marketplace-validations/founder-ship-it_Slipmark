@@ -2,7 +2,7 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-23T12:04:27.838Z",
+  "at": "2026-10-25T14:32:08.467Z",
   "subjects": [
     {
       "path": "src/attest/signing.ts",
@@ -15,17 +15,8 @@
   "against": [
     {
       "path": "docs/attestation.md",
-      "sha256": "17b4475988711e06e733f28ae2a825ad45ad4cffe488fea16ed7ae2def917a62"
+      "sha256": "3752b18b9857076c2c1aa90a4ef815e94aa53ebd8642bc0706a48b55ce414a63"
     }
   ],
-  "checks": [
-    {
-      "command": "npm test",
-      "exitCode": 0,
-      "outputSha256": "794c240ae86ccb905beaefbb6ebe8411be947dde490e136fa23a9a76f49966d0",
-      "durationMs": 9503,
-      "witnessed": true
-    }
-  ],
-  "note": "Reviewed signing: canonical JSON (sorted keys, undefined dropped) covers everything but signature; DSSE payload type and bytes must match; sigstore.verify with certificateIssuer pins GitHub Actions; network/TUF errors are unchecked (exit 2 only when required), others invalid; identity from the Fulcio SAN; * globs escape everything else; --sign refuses without an identity. Real fixture and CI e2e pass."
+  "note": "Signed verdicts section matches signing.ts: DSSE over canonical JSON minus signature, payload check, issuer default and signatures.issuer, * identity match, invalid always refuses, unreachable Sigstore exits 2 only when required."
 }
