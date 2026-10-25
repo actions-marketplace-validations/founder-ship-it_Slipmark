@@ -331,29 +331,34 @@ That's enough to start. With it:
      file built to stall it is refused, not left running.
    - **Pattern checks**, as a second net where parsers can disagree:
      invisible, direction-changing or text-smuggling Unicode, written
-     directly or as an HTML entity such as `&#x200B;`; HTML comments, closed
+     directly or as an HTML entity such as `&#x200B;` or `&ZeroWidthSpace;`; HTML comments, closed
      or not; any HTML tag outside code (an angle-bracket link like
      `<https://...>` is fine); every `]:` (any link or footnote definition
      contains it, however its label is laid out); fences for blocks GitHub
      draws (`mermaid`, `math`, `geojson`, `topojson`, `stl`); text after a
      code block's language; math on a line (two `$`, `$$` or ``$` ``), and,
-     in a file with a `$` anywhere, every line with a `%`; runs of 20 or more
+     in a file with a `$` anywhere, every line with a `%` (both outside code,
+     where GitHub doesn't render math); runs of 20 or more
      lines that render empty; images; and a file that isn't valid UTF-8, or
      is over 512 KB.
    - **GitHub's own renderer.** In GitHub Actions, each changed file that
      passes the allow-list is sent to GitHub's Markdown API in `markdown`
      mode, the renderer behind file and README views. Every word of the
-     file's own text must appear in what GitHub shows, apart from syntax:
-     link addresses, a code block's language, list numbers, task marks and
-     emoji shortcodes, which GitHub draws as the emoji.
-     The words come from the file, not from a parser, so anything a parser
-     drops is still compared. Math counts as not shown, since the browser
-     draws it. If GitHub ever changes how it renders, this follows, because
+     file's own text must appear in what GitHub shows, as often as it's
+     written. Only a known code-block language and list numbers are left
+     out. Link addresses count on both sides (written in the file, kept in
+     the page's links), each emoji shortcode must have become an emoji, and
+     the heading anchors GitHub adds don't count, so nothing GitHub shows
+     can stand in for something it hides. The words come from the file, not
+     from a parser, so anything a parser drops is still compared. Math
+     counts as not shown, since the browser draws it; CI checks GitHub still
+     renders math the way this assumes. If GitHub ever changes how it renders, this follows, because
      the answer comes from GitHub. It needs the Action's token (passed by
      default). Inside Actions without a token it refuses; outside Actions it's
      skipped and the report says so. Set `githubRender` to `"require"` to
      refuse outside Actions too, or `"off"` to skip it. Each file has 15
-     seconds and all files together a minute; running out refuses.
+     seconds and all files together a minute; running out refuses. The
+     allow-list and pattern checks also have a minute in all, across files.
 
    Code and data files (`.json`, `.yaml`, `.toml`, `.py`, `.ts`, `.sh` and
    similar), which GitHub shows as raw text, get only the Unicode, padding,
@@ -363,8 +368,9 @@ That's enough to start. With it:
    Markdown.
 
    Over-flagging is the safe side, so some harmless lines are refused too: a
-   TypeScript `[key: string]: unknown;` in an example, a shell sample with
-   both `$HOME` and `date +%Y`, or "costs $5 or $10". Reword them, or
+   TypeScript `[key: string]: unknown;` in an example, "costs $5 or $10" in
+   prose, `<br>` in a table, an `<!-- TODO -->` comment, or an emoji
+   shortcode GitHub doesn't know. Reword them, or
    acknowledge them. A finding is refused even with
    an approval, because the approver may not have seen it, unless an approver
    signs to say they have:
