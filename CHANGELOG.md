@@ -4,6 +4,8 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
 ### Security
 - **The policy is read from the base branch** (thanks Kent Bodrov). Before,
   `verify` read `.slipmark/policy.json` from the pull request's own checkout,
