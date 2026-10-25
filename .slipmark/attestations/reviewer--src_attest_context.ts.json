@@ -1,0 +1,22 @@
+{
+  "schema": "slipmark/attestation@2",
+  "by": "reviewer",
+  "verdict": "pass",
+  "at": "2026-10-25T18:46:35.967Z",
+  "subjects": [
+    {
+      "path": "src/attest/context.ts",
+      "sha256": "d59d7c9ef9d71d0ce0443184a16eb16373c27f1e12d8fe7e54d749d2b053f4fc"
+    }
+  ],
+  "agent": {
+    "model": "claude-opus-5-5"
+  },
+  "against": [
+    {
+      "path": "docs/attestation.md",
+      "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
+    }
+  ],
+  "note": "Pattern checks and the $ rule match the docs; the raw-HTML net uses maskCode, so a misread can slip past this layer, but the allow-list still refuses it (reproduced)"
+}
