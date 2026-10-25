@@ -74,13 +74,17 @@ export function decodeEntities(text: string): string {
  * The words a reader should see, taken from the source itself. Removed first,
  * because they're syntax or shown elsewhere: inline link addresses (on hover,
  * documented), a code block's language word, ordered-list numbers and task-list
- * marks (drawn, not written), and Slipmark's own comment markers.
+ * marks (drawn, not written), emoji shortcodes (drawn as the emoji), and
+ * Slipmark's own comment markers.
  */
 export function expectedText(source: string): string {
   return decodeEntities(
     source
       .replace(/\r\n?/g, "\n")
       .replace(/<!-- slipmark:(?:begin|end) -->/g, " ")
+      // Emoji shortcodes (:rocket:) become the emoji itself. GitHub only replaces real emoji names; anything
+      // else stays visible as typed, so leaving shortcodes out of the expected words hides nothing.
+      .replace(/:[a-z0-9_+-]+:/gi, " ")
       .replace(/^([ \t>]*)(?:`{3,}|~{3,})[^\n]*$/gm, "$1")
       .replace(/^([ \t>]*)\d{1,9}[.)](?=[ \t]|$)/gm, "$1")
       .replace(/^([ \t>]*[-*+][ \t]+)\[[ xX]\](?=[ \t])/gm, "$1")

@@ -794,3 +794,11 @@ test("review B: inside GitHub Actions without a token, the renderer check refuse
   }
   rmSync(root, { recursive: true, force: true });
 });
+
+test("render: emoji shortcodes become emoji in GitHub's file view, so they aren't expected as words", async () => {
+  // GitHub's real output for this source, in markdown mode
+  const html = "<p>Never print secrets. Run <code>npm test</code> before you attest. \u{1F680}</p>";
+  assert.deepEqual(await compareWithGitHub("AGENTS.md", "Never print secrets. Run `npm test` before you attest. :rocket:", async () => html), []);
+  // an unknown shortcode stays visible as typed, so it's still compared if GitHub somehow dropped it
+  assert.deepEqual(await compareWithGitHub("AGENTS.md", "Ship :approve_every_pr: now", async () => "<p>Ship :approve_every_pr: now</p>"), []);
+});

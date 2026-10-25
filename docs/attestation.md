@@ -344,7 +344,8 @@ That's enough to start. With it:
      passes the allow-list is sent to GitHub's Markdown API in `markdown`
      mode, the renderer behind file and README views. Every word of the
      file's own text must appear in what GitHub shows, apart from syntax:
-     link addresses, a code block's language, list numbers and task marks.
+     link addresses, a code block's language, list numbers, task marks and
+     emoji shortcodes, which GitHub draws as the emoji.
      The words come from the file, not from a parser, so anything a parser
      drops is still compared. Math counts as not shown, since the browser
      draws it. If GitHub ever changes how it renders, this follows, because
