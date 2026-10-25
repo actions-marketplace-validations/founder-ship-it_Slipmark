@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, symlinkSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -396,7 +396,7 @@ test("coverage: a changed link to a folder inside the repo is refused, not mista
   git("add", ".");
   git("commit", "-qm", "link");
   git("branch", "-f", "base");
-  rmSync(join(root, "active"));
+  unlinkSync(join(root, "active")); // removes the link itself; rmSync refuses a link to a folder on macOS
   symlinkSync("configs/evil", join(root, "active"));
   symlinkSync("configs/prod", join(root, "fresh-link"));
   save(root, createAttestation({ root, by: "reviewer", verdict: "pass", subjects: ["specs/export.md"], now: NOW }));
