@@ -2281,10 +2281,26 @@ function scanHiddenContent(path, text) {
       }
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
+    const flagged = /* @__PURE__ */ new Set();
     for (const d of linkDefinitions(body)) {
       if (out2.length >= MAX_FINDINGS) break;
-      const why = d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
+      flagged.add(d.line);
+      const why = d.label.startsWith("^") ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out2.push({ path, line: d.line, kind: "markdown_comment", detail: why });
+    }
+    const looksLikeDef = /^[ \t>*+\-0-9.)]*\[(\^?)(?:\\.|[^\]\\\n])+\]:/gm;
+    const lf = body.replace(/\r\n?/g, "\n");
+    for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      const line = lineOf(lf, m.index);
+      if (flagged.has(line)) continue;
+      flagged.add(line);
+      out2.push({
+        path,
+        line,
+        kind: "markdown_comment",
+        detail: m[1] ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : "looks like a Markdown link definition: renderers may hide it, agents read it. Write the link inline instead"
+      });
     }
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {

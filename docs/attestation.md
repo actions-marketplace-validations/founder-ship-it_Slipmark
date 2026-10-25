@@ -320,9 +320,11 @@ That's enough to start. With it:
    characters, bidirectional controls, tags, variation selectors, fillers);
    HTML comments, including one never closed; other raw HTML GitHub doesn't
    show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
-   (`[label]: url`), found with a Markdown parser wherever they sit (in a
-   quote or a list, with an escaped label, with the title on the next line).
-   Every one is flagged, used or not: a definition never renders, so text can
+   (`[label]: url`) and footnote definitions (`[^note]: text`), found with a
+   Markdown parser wherever they sit (in a quote or a list, with an escaped
+   label, with the title on the next line), plus a deliberately broad check for
+   any line that looks like one, because parsers disagree at the edges (tabs,
+   a quote continued without `>`). Every one is flagged, used or not: a definition never renders, so text can
    hide in its label, address or title. Write links inline (`[text](url)`)
    instead. Also flagged: a link title, which shows only on hover; runs of 20
    or more lines that render empty (blank, `&nbsp;`, `<br>`, a lone `\`);
@@ -405,6 +407,9 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
 - **Instructions inside other submodules.** A submodule at a context path is
   refused, but one elsewhere can carry its own AGENTS.md or `.claude/`, which
   agents load when they work in that folder. Updating it trips no context check.
+- **Text in a link's address.** An inline link's URL shows only on hover. A
+  long or empty-text link (`[](https://...)`) can carry text a reviewer won't
+  read.
 - **Single findings can't be approved.** A legitimate image, comment or link
   title in a changed context file is refused until it's removed or
   `hiddenContent` is set to `"allow"` on the base branch.
