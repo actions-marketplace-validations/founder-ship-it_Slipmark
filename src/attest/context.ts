@@ -9,11 +9,15 @@
  * to it that nobody approved, or that hide text from human reviewers.
  *
  * Pure: no file system or git access here. attestation.ts does the reading.
+ * Markdown is parsed with `marked` to find link definitions, which can sit in
+ * many places a hand-written pattern would miss.
  * Matching against these globs ignores case, because macOS and Windows
  * checkouts do, and agents read claude.md as readily as CLAUDE.md.
  */
 
 /** Where coding agents read their instructions and tools from. Override with `context.files` in the policy. */
+import { marked, type Token, type Tokens } from "marked";
+
 export const DEFAULT_CONTEXT_FILES = [
   // Instruction files, at any depth
   "**/AGENTS.md",
@@ -76,6 +80,55 @@ const BLANK_RUN = 20;
 
 const isMarkdownish = (path: string) => /\.(md|mdc|mdx|markdown|txt)$/i.test(path) || !/\.[A-Za-z0-9]+$/.test(path.split("/").pop() ?? "");
 
+const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toLowerCase();
+
+/** Every link reference definition in a Markdown document, with whether a link or image uses it. */
+export function linkDefinitions(body: string): { label: string; href: string; title?: string; used: boolean; commentLike: boolean; line: number }[] {
+  let tokens: ReturnType<typeof marked.lexer>;
+  try {
+    tokens = marked.lexer(body);
+  } catch {
+    return [];
+  }
+  const used = new Set<string>();
+  const walk = (list: Token[] | undefined) => {
+    for (const t of list ?? []) {
+      if (t.type === "link" || t.type === "image") {
+        const raw = (t as Tokens.Link).raw;
+        // [text][label], [label][] or the shortcut [label]: the label is the last bracketed group, or the text.
+        const full = /\]\[((?:\\.|[^\]\\])*)\]$/.exec(raw);
+        const shortcut = /^!?\[((?:\\.|[^\]\\])*)\](?:\[\])?$/.exec(raw);
+        const label = full && full[1] ? full[1] : shortcut ? shortcut[1] : null;
+        if (label) used.add(normLabel(label));
+      }
+      const anyT = t as { tokens?: Token[]; items?: { tokens?: Token[] }[]; rows?: { tokens?: Token[] }[][]; header?: { tokens?: Token[] }[] };
+      walk(anyT.tokens);
+      for (const item of anyT.items ?? []) walk(item.tokens);
+      for (const cell of anyT.header ?? []) walk(cell.tokens);
+      for (const row of anyT.rows ?? []) for (const cell of row) walk(cell.tokens);
+    }
+  };
+  walk(tokens);
+  const lines = body.split("\n");
+  const lineOfLabel = (label: string) => {
+    const needle = `[${label}]:`.toLowerCase();
+    const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
+    return i >= 0 ? i + 1 : 1;
+  };
+  return Object.entries(tokens.links ?? {}).map(([label, def]) => {
+    const href = (def as { href?: string }).href ?? "";
+    const title = (def as { title?: string }).title || undefined;
+    return {
+      label,
+      href,
+      ...(title ? { title } : {}),
+      used: used.has(normLabel(label)),
+      line: lineOfLabel(label),
+      commentLike: href === "" || href === "#" || href === "<>" || label.trim().startsWith("//") || (href.startsWith("#") && !used.has(normLabel(label))),
+    };
+  });
+}
+
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
 
 /**
@@ -121,26 +174,18 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (m[0].length === 0) { rawHtml.lastIndex++; continue; }
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
     }
-    // Link reference definitions render as nothing. Text can hide in one used as a comment ([//]: # (...)),
-    // in its title ([x]: https://... "hidden text"), or in one no link ever uses. Flag all of these.
-    const refDef = /^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>]*>|\S+)?[ \t]*("[^"]*"|'[^']*'|\([^)]*\))?[ \t]*(\S.*)?$/gm;
-    const withoutDefs = body.replace(refDef, "");
-    const used = (label: string) => {
-      const l = label.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
-      // [text][label], [label][], or the shortcut [label] not followed by ( or [
-      return new RegExp(`\\]\\[${l}\\]|\\[${l}\\]\\[\\]|\\[${l}\\](?![(\\[])`, "i").test(withoutDefs);
-    };
-    for (let m = refDef.exec(body); m; m = refDef.exec(body)) {
-      const [, label, dest, title, trailing] = m;
-      const commentLike = !dest || /^(?:#|<>)/.test(dest) || label!.trim().startsWith("//");
-      const why = commentLike
+    // Link reference definitions render as nothing, wherever they sit (a quote, a list, after an escaped
+    // bracket, with the title on the next line). A Markdown parser finds them all. Flag one used as a comment
+    // ([//]: # (...)), one with a title (shown only as a tooltip), or one no link uses.
+    for (const d of linkDefinitions(body)) {
+      const why = d.commentLike
         ? "Markdown reference used as a comment"
-        : title || trailing
-          ? "Markdown reference with a title"
-          : !used(label!)
+        : d.title
+          ? "Markdown reference with a title, shown only on hover"
+          : !d.used
             ? "Markdown reference no link uses"
             : null;
-      if (why) out.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
+      if (why) out.push({ path, line: d.line, kind: "markdown_comment", detail: `${why}: GitHub doesn't render it, agents read it` });
     }
     // Images: inline, reference-style, and HTML.
     const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;

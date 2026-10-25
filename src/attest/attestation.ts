@@ -1060,7 +1060,16 @@ function verifyCore(opts: {
           });
         }
         if (ctxPolicy.hiddenContent !== "allow") {
-          const findings = scanHiddenContent(path, readFileSync(join(root, path), "utf8"));
+          let text: string | null;
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));
+          } catch {
+            text = null; // UTF-16 or binary: the scan can't read it, so neither can a reviewer be sure what it says
+          }
+          const findings =
+            text === null
+              ? [{ path, line: 1, kind: "invisible_characters" as const, detail: "not valid UTF-8, so its text can't be checked" }]
+              : scanHiddenContent(path, text);
           if (findings.length) {
             const list = findings.slice(0, 5).map((h) => `line ${h.line}: ${h.detail}`).join("; ");
             results.push({

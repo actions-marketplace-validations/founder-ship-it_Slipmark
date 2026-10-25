@@ -320,8 +320,11 @@ That's enough to start. With it:
    characters, bidirectional controls, tags, variation selectors, fillers);
    HTML comments, including one never closed; other raw HTML GitHub doesn't
    show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
-   that hide text (used as a comment like `[//]: # (...)`, carrying a title, or
-   never used by a link); runs of 20 or more lines that render empty (blank,
+   that hide text, found with a Markdown parser wherever they sit (in a quote
+   or a list, with an escaped label, with the title on the next line): one used
+   as a comment like `[//]: # (...)`, one with a title (shown only on hover),
+   or one no link uses; a file that isn't valid UTF-8, which can't be checked
+   at all; runs of 20 or more lines that render empty (blank,
    `&nbsp;`, `<br>`, a lone `\`); and images, inline or reference-style.
    Comments, HTML and images are only looked for in prose files (Markdown, MDX,
    text, no extension), because GitHub shows JSON and YAML as raw text. Any finding is
@@ -369,7 +372,7 @@ from a subfolder, `attest` and `verify` exit 2.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context |
+| `files` | the list below | Globs for agent context files. Case is ignored at the repository root and inside dot-folders, where agents on macOS and Windows open `claude.md` as `CLAUDE.md`, and respected elsewhere, so `docs/providers/claude.md` isn't context. The cost: a nested `pkg/Claude.md` isn't context either |
 | `approvers` | `["human"]` | Kinds whose verdict approves a context change: `human`, `tool`, `agent` |
 | `approverSigners` | none | If set, an approval must also be signed by one of these identities |
 | `requireRecorded` | `true` | Verdicts must record their context |
@@ -397,6 +400,12 @@ Default context files: `AGENTS.md`, `AGENTS.override.md`, `AGENT.md`,
   `.github/workflows/` isn't context; protect workflows with CODEOWNERS.
 - **Deletions.** Deleting a context file is caught by check 2, so verdicts
   must be redone, but it needs no approval under check 3.
+- **Instructions inside other submodules.** A submodule at a context path is
+  refused, but one elsewhere can carry its own AGENTS.md or `.claude/`, which
+  agents load when they work in that folder. Updating it trips no context check.
+- **Single findings can't be approved.** A legitimate image, comment or link
+  title in a changed context file is refused until it's removed or
+  `hiddenContent` is set to `"allow"` on the base branch.
 
 ## Signed verdicts
 
