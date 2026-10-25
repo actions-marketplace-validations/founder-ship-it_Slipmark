@@ -2311,19 +2311,18 @@ function scanHiddenContent(path, text) {
         detail: `"]:" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code`
       });
     }
-    const drawnFence = /^[ \t>]*(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gim;
+    const drawnFence = /(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
     for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
       if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1].toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
     }
-    const mathPercent = /^[^\n]*\$[^\n]*%[^\n]*$|^[^\n]*%[^\n]*\$[^\n]*$/gm;
-    for (let m = mathPercent.exec(body); m; m = mathPercent.exec(body)) {
-      if (out2.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) {
-        mathPercent.lastIndex++;
-        continue;
+    if (body.includes("$")) {
+      const lines2 = body.split(/\r\n?|\n/);
+      for (let i = 0; i < lines2.length && out2.length < MAX_FINDINGS; i++) {
+        if (lines2[i].includes("%")) {
+          out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });
+        }
       }
-      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "a % next to $ math: GitHub renders math and hides % comments in it" });
     }
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {

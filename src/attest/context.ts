@@ -244,17 +244,21 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     }
     // Fenced blocks GitHub draws instead of showing (diagrams, maps, models, formulas) drop their comments
     // (%% in Mermaid, % in TeX). Agent instructions don't need them, so they're refused outright.
-    const drawnFence = /^[ \t>]*(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gim;
+    // Matched anywhere on a line, so a fence opened after a list marker or quote is still seen.
+    const drawnFence = /(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
     for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1]!.toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
     }
-    // Inline and block math ($...$, $$...$$) also hides % comments. Any line with both $ and % is flagged.
-    const mathPercent = /^[^\n]*\$[^\n]*%[^\n]*$|^[^\n]*%[^\n]*\$[^\n]*$/gm;
-    for (let m = mathPercent.exec(body); m; m = mathPercent.exec(body)) {
-      if (out.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) { mathPercent.lastIndex++; continue; }
-      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "a % next to $ math: GitHub renders math and hides % comments in it" });
+    // Math ($...$, $$...$$, across lines or not) hides % comments. Telling math from prose means parsing it, so
+    // instead: if the file has a $ anywhere, every line with a % is flagged. Complete, linear, can't miss.
+    if (body.includes("$")) {
+      const lines2 = body.split(/\r\n?|\n/);
+      for (let i = 0; i < lines2.length && out.length < MAX_FINDINGS; i++) {
+        if (lines2[i]!.includes("%")) {
+          out.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });
+        }
+      }
     }
     // Inline link titles show only on hover, like a definition's title.
     const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;

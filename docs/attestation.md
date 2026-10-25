@@ -339,9 +339,11 @@ That's enough to start. With it:
    `.svg`, notebooks and similar), is refused in agent context: write
    instructions in Markdown. So are blocks GitHub draws instead of showing,
    which drop their comments: ```` ```mermaid ````, ```` ```math ````,
-   ```` ```geojson ````, ```` ```topojson ```` and ```` ```stl ```` fences, and
-   any line with both `$` and `%` (math hides `%` comments; a line like "costs
-   $5, 80% coverage" is flagged too, so reword or acknowledge it). Any finding is
+   ```` ```geojson ````, ```` ```topojson ```` and ```` ```stl ```` fences
+   (wherever the fence starts, after a list marker too), and, in a file with a
+   `$` anywhere, every line with a `%` (math hides `%` comments; telling math
+   from prose would mean parsing it, so "costs $5, 80% coverage" is flagged
+   too: reword or acknowledge it). Any finding is
    refused as `hidden_content`, even with an approval, because the approver may
    not have seen it, unless an approver signs to say they have:
    ```bash
