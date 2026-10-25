@@ -158,7 +158,9 @@ report them as not covered too.
 Exit code 2 means the command couldn't run. For `verify`: a malformed policy,
 a coverage base that isn't in the checkout or isn't a plain ref, coverage run
 from somewhere other than the repository root, signatures required but
-Sigstore unreachable, or a flag given with no value.
+Sigstore unreachable, a `--policy-from` ref that isn't in the checkout, a
+policy on the base that isn't a regular file in a real folder, a subfolder run
+when only the repository root has a policy, or a flag given with no value.
 For `attest`: a passing verdict refused because a check failed, a missing or
 unreadable subject, or bad input.
 
@@ -245,8 +247,8 @@ coverage off. So when a base is known, the policy is read from there:
    The ref must be in the checkout, or `verify` exits 2.
 2. Otherwise the base given with `--coverage diff --base <ref>` on the
    command line, then the pull request's base branch
-   (`refs/remotes/origin/$GITHUB_BASE_REF` in GitHub Actions, by its full name
-   so a tag can't stand in for it). The Action fetches the base branch for you
+   (`refs/remotes/origin/$GITHUB_BASE_REF` in GitHub Actions, which must exist
+   under exactly that name, so a tag can't stand in for it). The Action fetches the base branch for you
    when the checkout doesn't have it. `coverage.base` inside the policy file is
    not used to find the policy.
 3. Otherwise (a local run, a push build) the checkout's own policy, as in v0.4.
@@ -256,8 +258,9 @@ coverage off. So when a base is known, the policy is read from there:
 Run from a subfolder (a package in a monorepo), `verify` reads that folder's
 `.slipmark/policy.json` from the base, just as it reads it from disk. If the
 folder has none but the repository root does, it exits 2 rather than skip the
-root's rules. A policy file on the base that isn't a regular file (a link, for
-example) is an error, never treated as "no policy".
+root's rules. A policy file on the base that isn't a regular file, or sits in a folder that
+isn't a real folder (a linked `.slipmark`, for example), is an error, never
+treated as "no policy".
 
 A branch that changes, adds or deletes the policy gets a notice: the base
 policy is applied, and the change takes effect once it's merged. Every report
@@ -307,8 +310,10 @@ slipmark verify --require-signed \
 or `signatures.require` and `signatures.trusted` in the policy file, or the
 Action's `require-signed` and `trusted-signers` inputs. Then a verdict typed by
 hand, or made by any other workflow, doesn't count. `*` in a trusted identity
-matches anything. Each verified result names its signer, and Slipmark Cloud
-shows it on the proof record.
+matches anything. `signatures.issuer` sets the OIDC issuer the signing
+certificate must come from (an https URL); it defaults to GitHub Actions. Each
+verified result names its signer, and Slipmark Cloud shows it on the proof
+record.
 
 **Trust a workflow at a protected ref.** On a pull request, GitHub runs the
 workflow file from the pull request itself, so the identity ends in

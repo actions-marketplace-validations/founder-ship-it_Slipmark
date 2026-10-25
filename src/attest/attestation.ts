@@ -448,15 +448,30 @@ export function policyTextAt(root: string, ref: string): string | null {
   }
   let commit: string;
   try {
+    if (!refExists(root, ref)) throw new Error("missing");
     commit = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
   } catch {
     throw new Error(`policy: can't find "${ref}" in this checkout, so the base branch's policy can't be read. Fetch it first (git fetch origin <branch>), or use actions/checkout with fetch-depth: 0.`);
   }
   // ls-tree, not cat-file -e: "not there" is null, anything odd (a link, a folder, a git error) is an error, never "no policy".
-  const read = (path: string): string | null => {
+  const entryAt = (path: string): string[] | null => {
     const entry = git(root, ["ls-tree", "-z", "--full-tree", commit, "--", path]).split("\0")[0];
-    if (!entry) return null;
-    const [mode, type, object] = entry.split("\t")[0]!.split(" ");
+    return entry ? entry.split("\t")[0]!.split(" ") : null;
+  };
+  const read = (path: string): string | null => {
+    const entry = entryAt(path);
+    if (!entry) {
+      // Missing only if every folder on the way is a real folder. A linked .slipmark would hide the policy, so it's an error.
+      const parts = path.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const dir = parts.slice(0, i).join("/");
+        const e = entryAt(dir);
+        if (!e) return null;
+        if (e[1] !== "tree") throw new Error(`policy: ${dir} on ${ref} isn't a folder (a link, for example), so the policy in it can't be trusted`);
+      }
+      return null;
+    }
+    const [mode, type, object] = entry;
     if (type !== "blob" || mode === "120000") throw new Error(`policy: ${path} on ${ref} isn't a regular file, so it can't be trusted as the policy`);
     return git(root, ["cat-file", "blob", object!]);
   };
@@ -466,6 +481,16 @@ export function policyTextAt(root: string, ref: string): string | null {
     throw new Error(`${POLICY_FILE} is at the repository root on ${ref}. Run from the root, or pass --no-policy to skip it on purpose.`);
   }
   return null;
+}
+
+/**
+ * Whether `ref` names something in this checkout. A full name (refs/...) must
+ * exist exactly: when refs/remotes/origin/main is missing, git would otherwise
+ * fall back to a tag of that name, which anyone who can push tags controls.
+ */
+function refExists(root: string, ref: string): boolean {
+  if (ref.startsWith("refs/")) return spawnSync("git", ["show-ref", "--verify", "--quiet", ref], { cwd: root, stdio: "ignore" }).status === 0;
+  return spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, stdio: "ignore" }).status === 0;
 }
 
 const sha256Text = (t: string): string => createHash("sha256").update(t).digest("hex");
@@ -522,7 +547,7 @@ export function resolvePolicy(opts: { root?: string; from?: string; candidates?:
     let found = false;
     try {
       checkBase(ref, "policy base");
-      found = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, stdio: "ignore" }).status === 0;
+      found = refExists(root, ref);
     } catch {
       found = false;
     }
@@ -542,6 +567,7 @@ export function checkBase(base: string, what: string = "coverage base"): void {
     throw new Error(`${what} must be a git ref such as origin/main, not "${base}"`);
   }
   if (base === "HEAD" || base === "@") {
+    if (what !== "coverage base") throw new Error(`${what} "${base}" is this branch itself. Use the branch you merge into, such as origin/main`);
     throw new Error(`${what} "${base}" would compare the branch with itself and cover nothing. Use the branch you merge into, such as origin/main`);
   }
 }

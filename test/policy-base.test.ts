@@ -265,3 +265,39 @@ test("errors name the policy base, not the coverage base", () => {
   assert.throws(() => resolvePolicy({ root, from: "--x" }), /policy base must be a git ref/);
   rmSync(root, { recursive: true, force: true });
 });
+
+test("policy-from base: a linked .slipmark folder on the base is an error, never treated as no policy", () => {
+  const { root, git } = setup(null);
+  git("checkout", "-q", "main");
+  mkdirSync(join(root, "real"));
+  writeFileSync(join(root, "real/policy.json"), JSON.stringify({ schema: POLICY_SCHEMA, require: ["src/auth.ts"] }));
+  rmSync(join(root, ".slipmark"), { recursive: true, force: true });
+  execFileSync("ln", ["-s", "real", join(root, ".slipmark")]);
+  git("add", "-A");
+  git("commit", "-qm", "linked slipmark folder");
+  git("update-ref", "refs/remotes/origin/main", "main");
+  git("checkout", "-q", "-B", "feature");
+  assert.throws(() => resolvePolicy({ root, from: "main" }), /.slipmark on main isn't a folder/);
+  const r = cli(root, ["verify"], { GITHUB_BASE_REF: "main" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("cli: with the base branch ref missing, a tag of the same full name doesn't stand in for it", () => {
+  const { root, git } = setup();
+  loosen(root);
+  git("add", ".");
+  git("commit", "-qm", "loosen");
+  git("update-ref", "-d", "refs/remotes/origin/main");
+  git("tag", "refs/remotes/origin/main");
+  const report = JSON.parse(cli(root, ["verify", "--json"], { GITHUB_BASE_REF: "main" }).stdout);
+  assert.equal(report.policy.source, "working-tree");
+  assert.match(report.policy.notes[0], /isn't in this checkout/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("errors: HEAD as a policy base is explained as the branch itself", () => {
+  const { root } = setup();
+  assert.throws(() => resolvePolicy({ root, from: "HEAD" }), /policy base "HEAD" is this branch itself/);
+  rmSync(root, { recursive: true, force: true });
+});
