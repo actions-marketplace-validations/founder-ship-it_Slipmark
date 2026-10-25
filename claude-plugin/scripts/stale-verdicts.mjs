@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 // src/attest/markdownSubset.ts
 var CODE_LANGUAGES = new Set(
-  "bash sh shell zsh fish console shellsession text txt plaintext plain output log diff patch json jsonc json5 yaml yml toml ini properties env dotenv csv tsv xml javascript js mjs cjs jsx typescript ts tsx mts cts node python py python3 ruby rb go golang rust rs java kotlin kt swift objc objective-c c h cpp c++ cc hpp cxx csharp cs c# fsharp fs php perl pl lua r dart scala elixir ex exs erlang erl haskell hs ocaml ml clojure clj elm nim zig crystal julia sql psql pgsql mysql sqlite graphql gql proto protobuf prisma html htm css scss sass less vue svelte astro dockerfile docker makefile make cmake gradle groovy hcl terraform tf nix powershell ps1 pwsh bat cmd batch vim viml nginx apache markdown md mdx regex gitignore gitattributes editorconfig http".split(/\s+/)
+  "bash sh shell zsh fish console shellsession text txt plaintext plain output log diff patch json jsonc json5 yaml yml toml ini properties env dotenv csv tsv xml javascript js mjs cjs jsx typescript ts tsx mts cts node python py python3 ruby rb go golang rust rs java kotlin kt swift objc objective-c c h cpp c++ cc hpp cxx csharp cs c# fsharp fs php perl pl lua r dart scala elixir ex exs erlang erl haskell hs ocaml ml clojure clj elm nim zig crystal julia sql psql pgsql mysql sqlite graphql gql proto protobuf prisma html htm css scss sass less vue svelte astro dockerfile docker makefile make cmake gradle groovy hcl terraform tf nix powershell ps1 pwsh bat cmd batch vim viml nginx apache markdown md mdx regex gitignore gitattributes editorconfig http conf config cfg jsonl ndjson erb jinja jinja2 j2 handlebars hbs liquid twig ejs mustache".split(/\s+/)
 );
 var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 
@@ -113,7 +113,7 @@ function scanHiddenContent(path, text) {
   if (OTHER_MARKUP.test(path)) {
     return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
   }
-  if (text.length > MAX_SCAN) {
+  if (Buffer.byteLength(text, "utf8") > MAX_SCAN) {
     return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
   }
   const body = text.charCodeAt(0) === 65279 ? text.slice(1) : text;
@@ -182,13 +182,19 @@ function scanHiddenContent(path, text) {
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "text after a code block's language, which GitHub doesn't show" });
     }
     const mathLine = /^[^\n]*(?:\$\$|\$`|\$[^\n]*\$)[^\n]*$/gm;
-    for (let m = mathLine.exec(body); m; m = mathLine.exec(body)) {
+    for (let m = mathLine.exec(prose); m; m = mathLine.exec(prose)) {
       if (out2.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) {
         mathLine.lastIndex++;
         continue;
       }
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "math, which GitHub draws and can show as blank space. Agent instructions don't need it" });
+    }
+    const namedInvisible = /&(?:ZeroWidthSpace|NegativeVeryThinSpace|NegativeThinSpace|NegativeMediumSpace|NegativeThickSpace|zwj|zwnj|shy|lrm|rlm|NoBreak|InvisibleTimes|InvisibleComma|it|ic|af|ApplyFunction|ii|dd|DD|ee|lre|rle|lro|rlo|pdf|nbsp);/g;
+    for (let m = namedInvisible.exec(body); m; m = namedInvisible.exec(body)) {
+      if (out2.length >= MAX_FINDINGS) break;
+      if (m[0] === "&nbsp;") continue;
+      out2.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
     }
     const entity = /&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));/g;
     for (let m = entity.exec(body); m; m = entity.exec(body)) {
@@ -201,8 +207,8 @@ function scanHiddenContent(path, text) {
       }
       INVISIBLE.lastIndex = 0;
     }
-    if (body.includes("$")) {
-      const lines2 = body.split(/\r\n?|\n/);
+    if (prose.includes("$")) {
+      const lines2 = prose.split(/\r\n?|\n/);
       for (let i = 0; i < lines2.length && out2.length < MAX_FINDINGS; i++) {
         if (lines2[i].includes("%")) {
           out2.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });
@@ -717,6 +723,7 @@ function verifyCore(opts) {
       );
       const approved = (path) => approvals(path).length > 0;
       const problemPaths = new Set(contextProblems.map((p) => p.path));
+      const scanStarted = Date.now();
       for (const f of changedFiles(root, ctxBase, "agent context")) {
         const path = toPosix(f);
         if (!currentContext.has(path) || problemPaths.has(path)) continue;
@@ -728,7 +735,9 @@ function verifyCore(opts) {
             message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${who}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`
           });
         }
-        if (ctxPolicy.hiddenContent !== "allow") {
+        if (ctxPolicy.hiddenContent !== "allow" && Date.now() - scanStarted > 6e4) {
+          results.push({ status: "hidden_content", subject: path, message: `${path} wasn't checked: the agent context checks ran out of time (a minute in all). Split the change, or simplify these files.` });
+        } else if (ctxPolicy.hiddenContent !== "allow") {
           let text;
           try {
             text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));

@@ -163,7 +163,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
   if (OTHER_MARKUP.test(path)) {
     return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
   }
-  if (text.length > MAX_SCAN) {
+  if (Buffer.byteLength(text, "utf8") > MAX_SCAN) {
     return [{ path, line: 1, kind: "invisible_characters", detail: `over ${MAX_SCAN / 1024} KB, too large to check. Agent instructions this long can't be reviewed by a person either` }];
   }
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // a leading byte-order mark is harmless
@@ -246,10 +246,17 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     // Math: GitHub draws $...$, $$...$$ and $`...`$, and TeX can draw text as blank space. Any line that could open
     // math (two $ on it, $$, or $`) is flagged. Math spread over lines is caught by GitHub's renderer in Actions.
     const mathLine = /^[^\n]*(?:\$\$|\$`|\$[^\n]*\$)[^\n]*$/gm;
-    for (let m = mathLine.exec(body); m; m = mathLine.exec(body)) {
+    for (let m = mathLine.exec(prose); m; m = mathLine.exec(prose)) {
       if (out.length >= MAX_FINDINGS) break;
       if (m[0].length === 0) { mathLine.lastIndex++; continue; }
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "math, which GitHub draws and can show as blank space. Agent instructions don't need it" });
+    }
+    // Named entities for invisible characters (&ZeroWidthSpace;, &shy;, &rlm; ...).
+    const namedInvisible = /&(?:ZeroWidthSpace|NegativeVeryThinSpace|NegativeThinSpace|NegativeMediumSpace|NegativeThickSpace|zwj|zwnj|shy|lrm|rlm|NoBreak|InvisibleTimes|InvisibleComma|it|ic|af|ApplyFunction|ii|dd|DD|ee|lre|rle|lro|rlo|pdf|nbsp);/g;
+    for (let m = namedInvisible.exec(body); m; m = namedInvisible.exec(body)) {
+      if (out.length >= MAX_FINDINGS) break;
+      if (m[0] === "&nbsp;") continue; // a visible space
+      out.push({ path, line: lineOf(body, m.index), kind: "invisible_characters", detail: `an invisible character written as ${m[0]}` });
     }
     // Invisible characters written as HTML entities (&#x200B;, &#8238;) are just as invisible once rendered.
     const entity = /&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));/g;
@@ -265,8 +272,8 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
     }
     // Math ($...$, $$...$$, across lines or not) hides % comments. Telling math from prose means parsing it, so
     // instead: if the file has a $ anywhere, every line with a % is flagged. Complete, linear, can't miss.
-    if (body.includes("$")) {
-      const lines2 = body.split(/\r\n?|\n/);
+    if (prose.includes("$")) {
+      const lines2 = prose.split(/\r\n?|\n/);
       for (let i = 0; i < lines2.length && out.length < MAX_FINDINGS; i++) {
         if (lines2[i]!.includes("%")) {
           out.push({ path, line: i + 1, kind: "hidden_html", detail: "a % in a file with $ in it: GitHub renders $ math and hides % comments in it. Reword, or acknowledge it" });

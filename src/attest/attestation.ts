@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { checkSignature, type AttestationSignature, type SignatureCheck, type SignaturePolicy } from "./signing.js";
-import { DEFAULT_CONTEXT_FILES, MAX_SCAN, checkMarkdownSubset, isMarkdownish, scanHiddenContent, type HiddenFinding } from "./context.js";
+import { DEFAULT_CONTEXT_FILES, MAX_SCAN, isMarkdownish, scanHiddenContent, type HiddenFinding } from "./context.js";
 import { compareWithGitHub, githubRenderer, type RenderFn } from "./githubRender.js";
 import { identityMatches } from "./signing.js";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -1072,6 +1072,7 @@ function verifyCore(opts: {
         );
       const approved = (path: string) => approvals(path).length > 0;
       const problemPaths = new Set(contextProblems.map((p) => p.path));
+      const scanStarted = Date.now();
       for (const f of changedFiles(root, ctxBase, "agent context")) {
         const path = toPosix(f);
         if (!currentContext!.has(path) || problemPaths.has(path)) continue;
@@ -1083,7 +1084,10 @@ function verifyCore(opts: {
             message: `${path} is agent context and changed since ${ctxBase}. It needs a passing verdict from: ${who}. Read it as an agent would, then: slipmark attest --kind ${approvers[0]} --by <you> --verdict pass --subject ${path}`,
           });
         }
-        if (ctxPolicy.hiddenContent !== "allow") {
+        if (ctxPolicy.hiddenContent !== "allow" && Date.now() - scanStarted > 60_000) {
+          // Each file has its own time limit; this caps them all together, so many files can't add up to a stall.
+          results.push({ status: "hidden_content", subject: path, message: `${path} wasn't checked: the agent context checks ran out of time (a minute in all). Split the change, or simplify these files.` });
+        } else if (ctxPolicy.hiddenContent !== "allow") {
           let text: string | null;
           try {
             text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(join(root, path)));
@@ -1229,9 +1233,7 @@ async function renderCheck(
     } catch {
       continue; // refused by the scan as not UTF-8
     }
-    if (text.length > MAX_SCAN) continue; // refused by the scan as too large
-    const sub = checkMarkdownSubset(path, text);
-    if (sub.findings.length) continue; // refused by the allow-list already
+    if (Buffer.byteLength(text, "utf8") > MAX_SCAN) continue; // refused by the scan as too large
     if (Date.now() - started > RENDER_BUDGET_MS) {
       findings.set(path, [{ path, line: 1, kind: "not_plain_markdown", detail: "ran out of time checking against GitHub's renderer" }]);
       continue;

@@ -27,7 +27,8 @@ const CODE_LANGUAGES = new Set(
     "html htm css scss sass less vue svelte astro " +
     "dockerfile docker makefile make cmake gradle groovy hcl terraform tf nix " +
     "powershell ps1 pwsh bat cmd batch vim viml nginx apache " +
-    "markdown md mdx regex gitignore gitattributes editorconfig http"
+    "markdown md mdx regex gitignore gitattributes editorconfig http " +
+    "conf config cfg jsonl ndjson erb jinja jinja2 j2 handlebars hbs liquid twig ejs mustache"
   ).split(/\s+/),
 );
 

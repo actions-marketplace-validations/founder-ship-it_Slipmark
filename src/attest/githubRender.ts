@@ -5,16 +5,18 @@
  * renderer behind file and README views) and checks that every word of the
  * file's own text appears in what GitHub shows. The expected words come from
  * the source, not from a parser, so nothing a parser quietly drops escapes the
- * comparison. Only parts of the source that are syntax, or that the
- * allow-list already restricts, are left out before comparing: link
- * addresses, a code block's language, list and task markers, Slipmark's own
- * markers. If GitHub ever hides something, or changes how it renders, this
+ * comparison. Nothing is stripped from the source but a known code-block
+ * language word, list numbers and Slipmark's own markers. Link addresses are
+ * counted on both sides (written in the source, in href on the page), and
+ * each emoji shortcode must have become an emoji, so nothing GitHub shows can
+ * stand in for something it hides. If GitHub ever hides something, or changes how it renders, this
  * catches it: the answer comes from GitHub, not from rules written here.
  *
  * Runs in GitHub Actions, where a token is available. Outside Actions it's
  * skipped and the report says so; inside Actions without a token it refuses.
  */
 import type { HiddenFinding } from "./context.js";
+import { isAllowedCodeLanguage } from "./markdownSubset.js";
 
 export type RenderFn = (text: string) => Promise<string>;
 
@@ -40,17 +42,29 @@ export function githubRenderer(opts: { token: string; repo?: string; apiUrl?: st
   };
 }
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+const ENTITIES: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "\u2014", ndash: "\u2013", hellip: "\u2026",
+  copy: "\u00A9", reg: "\u00AE", trade: "\u2122", rarr: "\u2192", larr: "\u2190", uarr: "\u2191", darr: "\u2193",
+  times: "\u00D7", divide: "\u00F7", plusmn: "\u00B1", deg: "\u00B0", middot: "\u00B7", bull: "\u2022",
+  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201C", rdquo: "\u201D", laquo: "\u00AB", raquo: "\u00BB",
+  euro: "\u20AC", pound: "\u00A3", yen: "\u00A5", cent: "\u00A2", sect: "\u00A7", para: "\u00B6", check: "\u2713",
+};
+/** Stands in for one emoji on both sides of the comparison. A private-use character: never a word. */
+const EMOJI = "\uE000";
 
 /** The text a reader sees in rendered HTML: no tags, no attributes, no script or style. Emoji shortcodes count by name. */
 export function visibleText(html: string): string {
-  return html
-    // Math is drawn by the browser, and TeX can draw text as blank space: its source doesn't count as visible.
-    .replace(/<(script|style|template|math-renderer|math)\b[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<g-emoji\b[^>]*\balias="([^"]*)"[^>]*>[\s\S]*?<\/g-emoji>/gi, " $1 ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m) => decodeEntities(m));
+  return decodeEntities(
+    html
+      // Math is drawn by the browser, and TeX can draw text as blank space: its source doesn't count as visible.
+      .replace(/<(script|style|template|math-renderer|math)\b[\s\S]*?<\/\1\s*>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      // A link's address counts as shown (on hover), matching the source, where it's written. Heading anchors
+      // GitHub adds aren't in the source, so they don't count: they could otherwise make up for hidden words.
+      .replace(/<a\b(?![^>]*\bclass="[^"]*\banchor\b)[^>]*\bhref="([^"]*)"[^>]*>/gi, " $1 ")
+      .replace(/<g-emoji\b[^>]*>[\s\S]*?<\/g-emoji>/gi, ` ${EMOJI} `)
+      .replace(/<[^>]*>/g, " "),
+  ).replace(/\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*/gu, ` ${EMOJI} `);
 }
 
 function words(text: string): Map<string, number> {
@@ -71,33 +85,35 @@ export function decodeEntities(text: string): string {
 }
 
 /**
- * The words a reader should see, taken from the source itself. Removed first,
- * because they're syntax or shown elsewhere: inline link addresses (on hover,
- * documented), a code block's language word, ordered-list numbers and task-list
- * marks (drawn, not written), emoji shortcodes (drawn as the emoji), and
- * Slipmark's own comment markers.
+ * The words a reader should see, taken from the source itself. Left out: a
+ * code block's language word (when it's a known language), ordered-list
+ * numbers (drawn, not written), and Slipmark's own comment markers. Emoji
+ * shortcodes are counted as emoji.
  */
 export function expectedText(source: string): string {
   return decodeEntities(
     source
       .replace(/\r\n?/g, "\n")
       .replace(/<!-- slipmark:(?:begin|end) -->/g, " ")
-      // Emoji shortcodes (:rocket:) become the emoji itself. GitHub only replaces real emoji names; anything
-      // else stays visible as typed, so leaving shortcodes out of the expected words hides nothing.
-      .replace(/:[a-z0-9_+-]+:/gi, " ")
-      .replace(/^([ \t>]*)(?:`{3,}|~{3,})[^\n]*$/gm, "$1")
-      .replace(/^([ \t>]*)\d{1,9}[.)](?=[ \t]|$)/gm, "$1")
-      .replace(/^([ \t>]*[-*+][ \t]+)\[[ xX]\](?=[ \t])/gm, "$1")
-      .replace(/\]\([ \t]*(?:<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)[ \t]*\)/g, "]"),
+      // An emoji shortcode becomes the emoji itself: counted as one emoji, not as words (see missingWords).
+      .replace(/:[a-z0-9_+-]+:/gi, ` ${EMOJI} `)
+      // A code block's language isn't shown. Only a single, known language word is left out; anything else
+      // on a fence line stays expected, so if GitHub hides it, the file is refused.
+      .replace(/^([ \t>]*)(?:`{3,}|~{3,})[ \t]*([^\s`~]*)[ \t]*$/gm, (m, lead: string, lang: string) => (isAllowedCodeLanguage(lang) ? lead : m))
+      .replace(/^([ \t>]*)\d{1,9}[.)](?=[ \t]|$)/gm, "$1"),
   );
 }
 
 /** Words the source says a reader should see that GitHub's rendering doesn't show (or shows fewer times). */
 export function missingWords(expected: string, renderedHtml: string): string[] {
+  const shown = visibleText(renderedHtml);
   const want = words(expected);
-  const got = words(visibleText(renderedHtml));
+  const got = words(shown);
   const missing: string[] = [];
   for (const [w, n] of want) if ((got.get(w) ?? 0) < n) missing.push(w);
+  // Each shortcode must have become an emoji. One GitHub shows as typed (not a real emoji name) is refused.
+  const count = (t: string) => t.split(EMOJI).length - 1;
+  if (count(expected) > count(shown)) missing.push("emoji");
   return missing;
 }
 
