@@ -2195,6 +2195,7 @@ var RENDERS_EMPTY = /^(?:\s|\\|&nbsp;|&ensp;|&emsp;|&thinsp;|&#160;|&#xa0;|<br\s
 var BLANK_RUN = 20;
 var ALLOWED_COMMENTS = /* @__PURE__ */ new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end -->"]);
 var MAX_SCAN = 512 * 1024;
+var SCAN_BUDGET_MS = 3e3;
 var MAX_FINDINGS = 50;
 var OTHER_MARKUP = /\.(rst|rest|adoc|asciidoc|asc|org|textile|rdoc|pod|creole|mediawiki|wiki|rmd|svg|ipynb)$/i;
 var SHOWN_RAW = /\.(json|jsonc|json5|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|mts|cts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|pl|sh|bash|zsh|fish|ps1|bat|cmd|sql|lua|r|dart|scala|ex|exs|erl|hs|ml|clj|vue|svelte|tf|hcl|gradle|properties|dockerfile|gitignore|gitattributes|editorconfig)$/i;
@@ -2244,6 +2245,9 @@ function linkDefinitions(input2) {
 var lineOf = (text, index) => text.slice(0, index).split("\n").length;
 function scanHiddenContent(path, text) {
   const out2 = [];
+  const started = Date.now();
+  const overBudget = () => Date.now() - started > SCAN_BUDGET_MS;
+  const tooSlow = () => [...out2, { path, line: 1, kind: "hidden_html", detail: "too complex to check in time" }];
   if (OTHER_MARKUP.test(path)) {
     return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
   }
@@ -2268,6 +2272,7 @@ function scanHiddenContent(path, text) {
       blankStart = -1;
     }
   }
+  if (overBudget()) return tooSlow();
   if (isMarkdownish(path)) {
     const comment = /<!--([\s\S]*?)(?:-->|$)/g;
     for (let m = comment.exec(body); m; m = comment.exec(body)) {
@@ -2281,15 +2286,12 @@ function scanHiddenContent(path, text) {
       if (closed && ALLOWED_COMMENTS.has(m[0])) continue;
       out2.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
-    const rawHtml = /<\?|<![A-Za-z]|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi;
+    const rawHtml = /<\?|<!(?:[A-Za-z]|\[CDATA\[)|<\/?[A-Za-z]/g;
     for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
       if (out2.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) {
-        rawHtml.lastIndex++;
-        continue;
-      }
-      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
+      out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML: GitHub hides attributes and some tags, agents read them. Write agent instructions in plain Markdown" });
     }
+    if (overBudget()) return tooSlow();
     const flagged = /* @__PURE__ */ new Set();
     for (const d of linkDefinitions(body)) {
       if (out2.length >= MAX_FINDINGS) break;
@@ -2297,6 +2299,7 @@ function scanHiddenContent(path, text) {
       const why = d.label.startsWith("^") ? "footnote definition: GitHub doesn't show it unless something points to it, agents read it" : d.duplicate ? "Markdown link definition repeating a label: it renders as nothing at all" : d.commentLike ? "Markdown link definition used as a comment" : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out2.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
+    if (overBudget()) return tooSlow();
     const lf = body.replace(/\r\n?/g, "\n");
     const looksLikeDef = /\]:/g;
     for (let m = looksLikeDef.exec(lf); m; m = looksLikeDef.exec(lf)) {
@@ -2311,7 +2314,8 @@ function scanHiddenContent(path, text) {
         detail: `"]:" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code`
       });
     }
-    const drawnFence = /(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
+    if (overBudget()) return tooSlow();
+    const drawnFence = /(?<![`~])(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
     for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
       if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1].toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
@@ -2324,12 +2328,12 @@ function scanHiddenContent(path, text) {
         }
       }
     }
-    const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
+    const inlineTitle = /\]\([ \t\n]*(?:<[^>\n]*>|[^\s()<]+)[ \t\n]+["'(]/g;
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
       if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "link title, shown only on hover: GitHub doesn't render it, agents read it" });
     }
-    const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
+    const image = /!\[/g;
     for (let m = image.exec(body); m; m = image.exec(body)) {
       if (out2.length >= MAX_FINDINGS) break;
       out2.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });

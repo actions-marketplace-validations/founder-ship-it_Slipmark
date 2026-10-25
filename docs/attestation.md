@@ -318,8 +318,10 @@ That's enough to start. With it:
    scanned, the whole file, for text a reviewer on GitHub may not see:
    invisible, direction-changing or text-smuggling Unicode (zero-width
    characters, bidirectional controls, tags, variation selectors, fillers);
-   HTML comments, including one never closed; other raw HTML GitHub doesn't
-   show (`<script>`, `<style>`, `<?...?>`, CDATA); Markdown link definitions
+   HTML comments, including one never closed; any raw HTML tag, since GitHub
+   strips some tags and never shows attributes such as `title`, `data-*` or
+   `value` (agent instructions don't need HTML; a comparison like `a < b`
+   is fine); Markdown link definitions
    (`[label]: url`) and footnote definitions (`[^note]: text`), found with a
    Markdown parser wherever they sit (in a quote or a list, with an escaped
    label, with the title on the next line). Because parsers disagree at the

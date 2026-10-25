@@ -82,6 +82,8 @@ const ALLOWED_COMMENTS = new Set(["<!-- slipmark:begin -->", "<!-- slipmark:end 
 
 /** Changed context files larger than this are refused rather than scanned. */
 export const MAX_SCAN = 512 * 1024;
+/** Most a single file's scan may take before it's refused as too complex to check. */
+const SCAN_BUDGET_MS = 3000;
 /** Enough to refuse and to show the reader; stops a file of a million comments costing a million line counts. */
 const MAX_FINDINGS = 50;
 
@@ -164,6 +166,10 @@ const lineOf = (text: string, index: number) => text.slice(0, index).split("\n")
  */
 export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
   const out: HiddenFinding[] = [];
+  // Every pattern here is linear, but a time budget backstops any future slow case: refuse, never stall.
+  const started = Date.now();
+  const overBudget = () => Date.now() - started > SCAN_BUDGET_MS;
+  const tooSlow = () => [...out, { path, line: 1, kind: "hidden_html" as const, detail: "too complex to check in time" }];
   if (OTHER_MARKUP.test(path)) {
     return [{ path, line: 1, kind: "hidden_html", detail: "a markup format GitHub renders, with its own hidden comments Slipmark can't check. Write agent instructions in Markdown" }];
   }
@@ -188,6 +194,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       blankStart = -1;
     }
   }
+  if (overBudget()) return tooSlow();
   if (isMarkdownish(path)) {
     // HTML comments, including one that is never closed: GitHub hides everything after <!--.
     const comment = /<!--([\s\S]*?)(?:-->|$)/g;
@@ -199,13 +206,15 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       if (closed && ALLOWED_COMMENTS.has(m[0])) continue;
       out.push({ path, line: lineOf(body, m.index), kind: "html_comment", detail: closed ? "HTML comment: GitHub doesn't render it, agents read it" : "unclosed HTML comment: GitHub hides everything after it" });
     }
-    // Raw HTML GitHub strips or doesn't show: processing instructions, declarations, CDATA, script and style.
-    const rawHtml = /<\?|<![A-Za-z]|<!\[CDATA\[|<(?:script|style|template|noscript)\b/gi; // the opening is enough: closed or not, GitHub hides it
+    // Raw HTML of any kind: GitHub strips some of it (script, style, declarations), never shows attributes
+    // (title, data-*, value), and collapses or hides more. Telling which is which means copying GitHub's
+    // sanitiser, so every tag opener is flagged: complete, linear. Agent instructions don't need HTML.
+    const rawHtml = /<\?|<!(?:[A-Za-z]|\[CDATA\[)|<\/?[A-Za-z]/g;
     for (let m = rawHtml.exec(body); m; m = rawHtml.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
-      if (m[0].length === 0) { rawHtml.lastIndex++; continue; }
-      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML GitHub doesn't display" });
+      out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: "raw HTML: GitHub hides attributes and some tags, agents read them. Write agent instructions in plain Markdown" });
     }
+    if (overBudget()) return tooSlow();
     // Link reference definitions render as nothing, and text can hide in the label, the address or the title.
     // Every one in a changed context file is flagged; write links inline instead. Found two ways: the parser
     // (labels across lines, escapes), and a deliberately broad line check for anything that looks like one,
@@ -223,6 +232,7 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
           : "Markdown link definition: it doesn't render, so a reviewer can't see what it says. Write the link inline instead";
       out.push({ path, line: d.line, kind: "markdown_comment", detail: why });
     }
+    if (overBudget()) return tooSlow();
     // Every link or footnote definition contains the two characters "]:" (the label's closing bracket, then
     // the colon), however the label is split or wherever it sits. So every "]:" is flagged: a complete
     // over-approximation, linear, with no guessing about Markdown forms. The parser above only gives the
@@ -242,10 +252,12 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
         detail: "\"]:\" may end a Markdown link or footnote definition, which renderers hide and agents read. Write links inline, or acknowledge it if it's code",
       });
     }
+    if (overBudget()) return tooSlow();
     // Fenced blocks GitHub draws instead of showing (diagrams, maps, models, formulas) drop their comments
     // (%% in Mermaid, % in TeX). Agent instructions don't need them, so they're refused outright.
     // Matched anywhere on a line, so a fence opened after a list marker or quote is still seen.
-    const drawnFence = /(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
+    // A fence starts only at the first backtick or tilde of a run, which keeps this linear.
+    const drawnFence = /(?<![`~])(?:`{3,}|~{3,})[ \t]*(mermaid|math|geojson|topojson|stl)\b/gi;
     for (let m = drawnFence.exec(body); m; m = drawnFence.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "hidden_html", detail: `a ${m[1]!.toLowerCase()} block, which GitHub draws instead of showing, so comments in it are hidden. Agent instructions don't need one` });
@@ -261,13 +273,13 @@ export function scanHiddenContent(path: string, text: string): HiddenFinding[] {
       }
     }
     // Inline link titles show only on hover, like a definition's title.
-    const inlineTitle = /\]\(\s*(?:<[^>\n]*>|[^\s()]+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/g;
+    const inlineTitle = /\]\([ \t\n]*(?:<[^>\n]*>|[^\s()<]+)[ \t\n]+["'(]/g; // the title's opening is enough
     for (let m = inlineTitle.exec(body); m; m = inlineTitle.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "markdown_comment", detail: "link title, shown only on hover: GitHub doesn't render it, agents read it" });
     }
     // Images: inline, reference-style, and HTML.
-    const image = /!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])|<img\b[^>]*>|<picture\b|<svg\b/gi;
+    const image = /!\[/g; // the opener is enough; HTML images are raw HTML, flagged above
     for (let m = image.exec(body); m; m = image.exec(body)) {
       if (out.length >= MAX_FINDINGS) break;
       out.push({ path, line: lineOf(body, m.index), kind: "image_reference", detail: "image in agent instructions: reviewers rarely open it, agents may read text inside it" });
