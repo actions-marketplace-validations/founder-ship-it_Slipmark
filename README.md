@@ -235,6 +235,10 @@ and Slipmark binds each verdict to the agent's instructions too:
 The policy is read from the base branch, so a pull request can't switch this
 off. What it doesn't cover yet is listed in the docs. Details in [docs/attestation.md](./docs/attestation.md#agent-context).
 
+See it refuse five real attack patterns (Ghostcommit, Deadbugz, hidden comments,
+invisible Unicode, a PR switching the checks off) as open pull requests in
+[slipmark-context-demo](https://github.com/founder-ship-it/slipmark-context-demo).
+
 ### Signed verdicts
 
 **Prove who gave the verdict, not just what it was about** (on `main`,
