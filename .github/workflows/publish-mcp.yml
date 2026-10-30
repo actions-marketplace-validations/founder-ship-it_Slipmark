@@ -1,0 +1,48 @@
+# Lists the current version in the official MCP Registry
+# (registry.modelcontextprotocol.io), where MCP clients and directories find
+# servers. Run it by hand after approving the staged npm release: the registry
+# checks that slipmark@<version> on npm carries the matching mcpName.
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # GitHub OIDC login to the registry, for the io.github.founder-ship-it namespace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check server.json matches package.json and npm
+        run: |
+          set -euo pipefail
+          v=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').mcpName")
+          node -e '
+            const s = require("./server.json"), p = require("./package.json");
+            const pkg = s.packages.find((x) => x.registryType === "npm" && x.identifier === p.name);
+            if (s.name !== p.mcpName || s.version !== p.version || !pkg || pkg.version !== p.version) {
+              console.error("server.json name/version must match package.json mcpName/version"); process.exit(1);
+            }'
+          live=$(npm view "slipmark@$v" mcpName 2>/dev/null || true)
+          if [ "$live" != "$name" ]; then
+            echo "::error::slipmark@$v isn't live on npm with mcpName $name yet. Approve the staged release on npmjs.com first."
+            exit 1
+          fi
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --help >/dev/null
+      - name: Log in with this workflow's GitHub identity
+        run: ./mcp-publisher login github-oidc
+      - name: Publish
+        run: ./mcp-publisher publish

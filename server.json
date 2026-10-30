@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.founder-ship-it/slipmark",
+  "title": "Slipmark",
+  "description": "Record AI agent verdicts bound to file hashes; refuse ones whose files or instructions changed.",
+  "repository": {
+    "url": "https://github.com/founder-ship-it/Slipmark",
+    "source": "github"
+  },
+  "websiteUrl": "https://www.replyintelligencegroup.co.uk/products/slipmark",
+  "version": "0.6.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "slipmark",
+      "version": "0.6.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Runs the MCP server"
+        }
+      ]
+    }
+  ]
+}

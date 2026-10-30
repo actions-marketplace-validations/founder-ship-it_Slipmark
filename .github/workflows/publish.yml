@@ -1,0 +1,69 @@
+# Stages slipmark on npm when a GitHub release is published, with npm's
+# trusted publishing: no npm token is stored anywhere, and the build carries a
+# provenance statement tying it to this workflow and commit.
+#
+# Staged, not published: the version goes live only when a maintainer approves
+# it on npmjs.com (Staged Packages tab) or with `npm stage approve <id>`, with
+# 2FA. A stolen workflow can't ship a release on its own.
+#
+# One-time setup on npmjs.com: package settings > Trusted publisher > GitHub
+# Actions, with owner founder-ship-it, repository Slipmark, workflow
+# publish.yml and environment npm. "Allow npm publish" stays unticked.
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write   # the identity npm checks, and provenance is signed with
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.15.0 or later (staged publishing needs it)
+        run: npm install -g npm@^11.15.0 && npm --version
+      - name: Check the tag matches package.json
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Release tag $TAG doesn't match package.json version $version. Bump the version first."
+            exit 1
+          fi
+      - name: Check this version isn't on npm yet
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if npm view "slipmark@$version" version >/dev/null 2>&1; then
+            echo "::notice title=Already published::slipmark@$version is already on npm, nothing to do"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - run: npm ci
+        if: env.SKIP != '1'
+      - name: Test
+        if: env.SKIP != '1'
+        run: npm test
+      - name: Stage for approval
+        if: env.SKIP != '1'
+        run: npm stage publish
+      - name: Summary
+        if: env.SKIP != '1'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "Staged slipmark@$version. Approve it on npmjs.com (Staged Packages tab) or with \`npm stage approve <id>\`, with 2FA, to make it live." >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Approve on npm::slipmark@$version is staged. Approve it on npmjs.com to publish."

@@ -1,6 +1,7 @@
 {
   "name": "slipmark",
-  "version": "0.5.0",
+  "version": "0.6.1",
+  "mcpName": "io.github.founder-ship-it/slipmark",
   "description": "Make AI agents prove what they checked. Bind every agent verdict to a SHA-256 of the files it read, refuse on mismatch, and diagnose AI feature drift with honest repair prompts.",
   "homepage": "https://www.replyintelligencegroup.co.uk/products/slipmark",
   "repository": {
@@ -23,7 +24,8 @@
     "src",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -57,9 +59,15 @@
     "copilot",
     "agents-md",
     "proof-of-read",
-    "sha256"
+    "sha256",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "codex",
+    "ai-security"
   ],
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^22.19.21",
     "esbuild": "^0.24.2",
     "typescript": "^5.9.3"

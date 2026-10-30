@@ -4,6 +4,47 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-30
+
+### Added
+- **Listed in the official MCP Registry** as
+  `io.github.founder-ship-it/slipmark`, so MCP clients and directories can
+  find the server. `server.json` describes it, and package.json carries the
+  matching `mcpName` the registry checks.
+- **Releases publish from GitHub, with provenance.** A GitHub release stages
+  the version on npm through trusted publishing, with no npm token anywhere,
+  and it goes live once a maintainer approves it with 2FA. See CONTRIBUTING.
+
+## [0.6.0] - 2026-10-30
+
+### Security
+- **`slipmark attest` never writes through a link inside the repository.** A
+  pull request could commit a link at an attestation's file name, or make
+  `.slipmark/` a link, so attesting in that checkout wrote a file outside the
+  repository. A link at the file, or at any folder between the top of the
+  repository and it, is now refused before anything is created, and the file
+  is written to a temporary name then renamed into place. Found in review of
+  the MCP server.
+
+### Added
+- **`slipmark mcp`**: an MCP server on stdio with two tools, `slipmark_attest`
+  and `slipmark_verify`, so Codex, Cursor, Copilot, Claude Code, Gemini CLI and
+  any other MCP client can record and check verdicts. Verdicts it records are
+  `kind: agent`; it can't record a human approval, run commands or sign. No
+  network calls except Sigstore checks of signed verdicts, and no new runtime
+  dependencies. Setup in [docs/mcp.md](./docs/mcp.md).
+
+### Changed
+- **Claude Code plugin: Claude knows when its instructions changed.** When
+  the policy has a `context` section, the plugin's Stop hook now also flags
+  verdicts given under a different AGENTS.md, CLAUDE.md, skill, hook or MCP
+  config, asks Claude to read the changed instructions before attesting again,
+  and to tell the user, since a person has to approve them. It reads only the
+  context file list from the working tree's policy; approvals, hidden content
+  and coverage stay with the CI gate, which reads the policy from the base
+  branch. Update with `/plugin marketplace update slipmark`.
+- The npm package now includes this changelog.
+
 ## [0.5.0] - 2026-10-25
 
 ### Security
