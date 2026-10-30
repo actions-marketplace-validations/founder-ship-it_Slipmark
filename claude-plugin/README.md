@@ -25,7 +25,7 @@ New to Slipmark in this repository? Run `/slipmark:setup`.
 | `attest-verdicts` skill | Claude loads it when it gives a verdict, and records one with `npx slipmark@0.5.0 attest`. |
 | `/slipmark:verify` | Runs `npx slipmark@0.5.0 verify` and explains any refusal. |
 | `/slipmark:setup` | Shows, then runs, `npx slipmark@0.5.0 init` to add the workflow and agent instructions. |
-| Stop hook | After each response, if `.slipmark/attestations/` exists, re-checks the verdicts locally (no network). If a file changed after it was attested, Claude is asked once to re-read it and attest again. |
+| Stop hook | After each response, if `.slipmark/attestations/` exists, re-checks the verdicts locally (no network). If a file changed after it was attested, Claude is asked once to re-read it and attest again. With `"context"` in `.slipmark/policy.json`, it also tells Claude when its own instructions (AGENTS.md, CLAUDE.md, skills, hooks, MCP config) changed after a verdict, and that a person has to approve that change. |
 
 ## What it runs, sends and stores
 

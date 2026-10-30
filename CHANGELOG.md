@@ -4,6 +4,16 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Claude Code plugin 0.5.1: Claude knows when its instructions changed.** When
+  the policy has a `context` section, the plugin's Stop hook now also flags
+  verdicts given under a different AGENTS.md, CLAUDE.md, skill, hook or MCP
+  config, asks Claude to read the changed instructions before attesting again,
+  and to tell the user, since a person has to approve them. It reads only the
+  context file list from the working tree's policy; approvals, hidden content
+  and coverage stay with the CI gate, which reads the policy from the base
+  branch. Update with `/plugin marketplace update slipmark`.
+
 ## [0.5.0] - 2026-10-25
 
 ### Security
