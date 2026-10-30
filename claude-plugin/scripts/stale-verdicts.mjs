@@ -231,8 +231,8 @@ function scanHiddenContent(path, text) {
 
 // src/attest/attestation.ts
 import { execFileSync, spawnSync as spawnSync2 } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 var ATTESTATION_SCHEMA = "slipmark/attestation@1";
 var ATTESTATION_SCHEMA_V2 = "slipmark/attestation@2";
 var POLICY_SCHEMA = "slipmark/policy@1";
