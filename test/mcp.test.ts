@@ -163,3 +163,14 @@ test("mcp: refuses to serve a subfolder of a repository", () => {
   assert.equal(mcpRoot(["--root", root], {}, "/"), root);
   assert.equal(existsSync(mcpRoot([], { SLIPMARK_ROOT: root }, "/")), true);
 });
+
+test("mcp: server.json matches package.json, so the MCP Registry accepts it", () => {
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const server = JSON.parse(readFileSync("server.json", "utf8"));
+  assert.equal(server.name, pkg.mcpName);
+  assert.equal(server.version, pkg.version);
+  const npm = server.packages.find((p: { registryType: string }) => p.registryType === "npm");
+  assert.equal(npm.identifier, pkg.name);
+  assert.equal(npm.version, pkg.version);
+  assert.ok(server.description.length <= 100);
+});

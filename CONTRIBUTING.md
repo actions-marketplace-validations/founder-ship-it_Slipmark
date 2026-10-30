@@ -78,6 +78,9 @@ Every change needs a test. Run `npm test`. New engine behavior should assert the
    first.
 4. Approve the staged version on npmjs.com (Staged Packages tab) or with
    `npm stage approve <id>`, with 2FA. Only then does it go live.
+5. Run the "Publish to MCP Registry" workflow (Actions tab, Run workflow) to
+   list the new version in the MCP Registry. Keep `version` in server.json in
+   step with package.json; a test checks it.
 
 ## Non-negotiables (the things that make Slipmark trustworthy)
 
