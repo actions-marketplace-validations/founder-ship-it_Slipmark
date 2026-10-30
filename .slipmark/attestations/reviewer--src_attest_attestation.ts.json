@@ -2,11 +2,11 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-25T18:44:45.689Z",
+  "at": "2026-10-30T07:51:50.794Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "4b2c1051aabe473da14bd7958edf5be0348b2b401118d214a29df2cb5d69ddaa"
+      "sha256": "23a3201f67b2cc73f16d421b76464cdde899eef76e5b14d999a38335b612d9cf"
     }
   ],
   "agent": {
@@ -18,5 +18,5 @@
       "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
     }
   ],
-  "note": "Final review: every $ line refused (code included); maskCode bypasses closed; href/emoji counting, renderer fail-closed paths and stall limits verified; 186 tests pass"
+  "note": "Checked writeAttestation refuses links at the file and at every folder from the git top-level down before creating anything (reproduced linked .slipmark from root and from a subfolder, and a link deep in --dir: nothing written outside), temp-then-rename in the same folder, legitimate --out outside the repo and subfolder attests still work, npm test 210/210."
 }

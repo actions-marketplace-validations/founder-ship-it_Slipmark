@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   createAttestation,
@@ -164,4 +164,96 @@ test("paths: in-repo names that merely start with '..' are accepted", () => {
   assert.ok(resolveSubject(root, "..notes.md"));
   const att = createAttestation({ root, subjects: ["..notes.md"], verdict: "pass", by: "a" });
   assert.equal(att.subjects[0]!.path, "..notes.md");
+});
+
+test("writeAttestation: a link planted at the attestation's name is refused, its target untouched", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-link-"));
+  writeFileSync(join(root, "a.ts"), "1\n");
+  const outside = join(mkdtempSync(join(tmpdir(), "sm-out-")), "victim.txt");
+  writeFileSync(outside, "keep me\n");
+  const att = createAttestation({ root, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const path = defaultAttestationPath(join(root, ".slipmark/attestations"), att);
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(outside, path);
+  assert.throws(() => writeAttestation(path, att), /is a link/);
+  assert.equal(readFileSync(outside, "utf8"), "keep me\n");
+});
+
+test("writeAttestation: a linked attestations folder inside the working folder is refused", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-linkdir-"));
+  writeFileSync(join(root, "a.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outdir-"));
+  mkdirSync(join(root, ".slipmark"));
+  symlinkSync(outside, join(root, ".slipmark/attestations"));
+  const att = createAttestation({ root, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(root);
+  try {
+    assert.throws(() => writeAttestation(defaultAttestationPath(join(root, ".slipmark/attestations"), att), att), /is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test("writeAttestation: re-attesting replaces the file and leaves no temp files", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-rew-"));
+  writeFileSync(join(root, "a.ts"), "1\n");
+  const att = createAttestation({ root, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const path = defaultAttestationPath(join(root, ".slipmark/attestations"), att);
+  writeAttestation(path, att);
+  writeAttestation(path, { ...att, verdict: "fail" });
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).verdict, "fail");
+  assert.deepEqual(readdirSync(dirname(path)), [basename(path)]);
+});
+
+test("writeAttestation: a linked .slipmark is refused before anything is created at its target", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-linkslip-"));
+  writeFileSync(join(root, "a.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outslip-"));
+  symlinkSync(outside, join(root, ".slipmark"));
+  const att = createAttestation({ root, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(root);
+  try {
+    assert.throws(() => writeAttestation(defaultAttestationPath(join(root, ".slipmark/attestations"), att), att), /\.slipmark is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), [], "no attestations folder made outside the repo");
+});
+
+test("writeAttestation: a link deeper in a chosen --dir is refused too", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-deep-"));
+  writeFileSync(join(root, "a.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outdeep-"));
+  mkdirSync(join(root, "x"));
+  symlinkSync(outside, join(root, "x/y"));
+  const att = createAttestation({ root, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(root);
+  try {
+    assert.throws(() => writeAttestation(join(root, "x/y/z/w/att.json"), att), /x\/y is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test("writeAttestation: a linked .slipmark is refused when attesting from a subfolder", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-sub-"));
+  execFileSync("git", ["init", "-q", root]);
+  mkdirSync(join(root, "sub"));
+  writeFileSync(join(root, "sub/b.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outsub-"));
+  symlinkSync(outside, join(root, ".slipmark"));
+  const att = createAttestation({ root, subjects: ["sub/b.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(join(root, "sub"));
+  try {
+    assert.throws(() => writeAttestation(join(root, ".slipmark/attestations/x.json"), att), /\.slipmark is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
 });

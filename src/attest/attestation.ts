@@ -19,8 +19,8 @@ import { DEFAULT_CONTEXT_FILES, MAX_SCAN, isMarkdownish, scanHiddenContent, type
 import { compareWithGitHub, githubRenderer, type RenderFn } from "./githubRender.js";
 import { identityMatches } from "./signing.js";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const ATTESTATION_SCHEMA = "slipmark/attestation@1";
 /**
@@ -482,9 +482,65 @@ export function defaultAttestationPath(dir: string, att: Attestation): string {
   return join(dir, `${slug}.json`);
 }
 
+/**
+ * Writes an attestation without following links. A pull request can commit a
+ * link at an attestation's predictable name, or link `.slipmark/` elsewhere;
+ * writing through either would put the file (or overwrite one) outside the
+ * repository when someone attests in that checkout. So: refuse a link at the
+ * file or at any folder on its way down from the top of the repository (checked
+ * before anything is created), and write
+ * a temporary file then rename it over the name, which replaces a link rather
+ * than writing to its target.
+ */
 export function writeAttestation(filePath: string, att: Attestation): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(att, null, 2) + "\n", "utf8");
+  const file = resolve(filePath);
+  const dir = dirname(file);
+  const cwd = resolve(process.cwd());
+  // Check from the top of the repository, so a linked .slipmark is caught when
+  // attesting from a subfolder too. Outside a repository, from the working folder.
+  let top = cwd;
+  try {
+    // git prints the real path (macOS: /private/var/...); map it back onto the working folder's spelling.
+    top = resolve(cwd, relative(realpathSync(cwd), realpathSync(git(cwd, ["rev-parse", "--show-toplevel"]).trim())));
+  } catch {
+    top = cwd;
+  }
+  if (dir === top || dir.startsWith(top + sep)) {
+    // Inside the repository: check each level before creating anything, so a
+    // linked folder can't even get an empty directory made at its target.
+    let d = top;
+    for (const part of relative(top, dir).split(sep).filter(Boolean)) {
+      d = join(d, part);
+      let st: ReturnType<typeof lstatSync> | undefined;
+      try {
+        st = lstatSync(d);
+      } catch {
+        st = undefined;
+      }
+      if (!st) mkdirSync(d);
+      else if (st.isSymbolicLink()) throw new Error(`${relative(cwd, d)} is a link: refusing to write an attestation through it`);
+      else if (!st.isDirectory()) throw new Error(`${relative(cwd, d)} is not a folder`);
+    }
+  } else {
+    mkdirSync(dir, { recursive: true }); // a folder the user chose outside the repository
+  }
+  let existing: ReturnType<typeof lstatSync> | undefined;
+  try {
+    existing = lstatSync(file);
+  } catch {
+    existing = undefined; // doesn't exist yet
+  }
+  if (existing && !existing.isFile()) {
+    throw new Error(`${relative(cwd, file)} is ${existing.isSymbolicLink() ? "a link" : "not a regular file"}: refusing to write an attestation through it`);
+  }
+  const tmp = join(dir, `.${basename(file)}.${process.pid}.${createHash("sha256").update(`${Date.now()}${Math.random()}`).digest("hex").slice(0, 8)}.tmp`);
+  writeFileSync(tmp, JSON.stringify(att, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  try {
+    renameSync(tmp, file);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* already gone */ }
+    throw e;
+  }
 }
 
 function isSubjectList(v: unknown, allowEmpty: boolean): boolean {
