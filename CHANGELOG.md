@@ -4,6 +4,17 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-30
+
+### Added
+- **Listed in the official MCP Registry** as
+  `io.github.founder-ship-it/slipmark`, so MCP clients and directories can
+  find the server. `server.json` describes it, and package.json carries the
+  matching `mcpName` the registry checks.
+- **Releases publish from GitHub, with provenance.** A GitHub release stages
+  the version on npm through trusted publishing, with no npm token anywhere,
+  and it goes live once a maintainer approves it with 2FA. See CONTRIBUTING.
+
 ## [0.6.0] - 2026-10-30
 
 ### Security
