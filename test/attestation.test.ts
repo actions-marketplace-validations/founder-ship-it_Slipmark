@@ -257,3 +257,22 @@ test("writeAttestation: a linked .slipmark is refused when attesting from a subf
   }
   assert.deepEqual(readdirSync(outside), []);
 });
+
+test("writeAttestation: links are caught when the repository is reached through another spelling (macOS /var is /private/var)", () => {
+  const real = mkdtempSync(join(tmpdir(), "sm-spell-"));
+  const alias = join(mkdtempSync(join(tmpdir(), "sm-alias-")), "repo");
+  symlinkSync(real, alias); // like /var -> /private/var
+  execFileSync("git", ["init", "-q", real]);
+  writeFileSync(join(real, "a.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outspell-"));
+  symlinkSync(outside, join(real, ".slipmark"));
+  const att = createAttestation({ root: real, subjects: ["a.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(real); // process.cwd() now gives the real spelling; the path below uses the alias
+  try {
+    assert.throws(() => writeAttestation(join(alias, ".slipmark/attestations/x.json"), att), /is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+});

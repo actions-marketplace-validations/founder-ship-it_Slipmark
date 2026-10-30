@@ -498,14 +498,32 @@ export function writeAttestation(filePath: string, att: Attestation): void {
   const cwd = resolve(process.cwd());
   // Check from the top of the repository, so a linked .slipmark is caught when
   // attesting from a subfolder too. Outside a repository, from the working folder.
-  let top = cwd;
+  let realTop: string;
   try {
-    // git prints the real path (macOS: /private/var/...); map it back onto the working folder's spelling.
-    top = resolve(cwd, relative(realpathSync(cwd), realpathSync(git(cwd, ["rev-parse", "--show-toplevel"]).trim())));
+    realTop = realpathSync(git(cwd, ["rev-parse", "--show-toplevel"]).trim());
   } catch {
-    top = cwd;
+    realTop = realpathSync(cwd);
   }
-  if (dir === top || dir.startsWith(top + sep)) {
+  // The same folder can be spelled two ways (macOS: /var/... is /private/var/...).
+  // Find the outermost ancestor of the target that *is* the repository top,
+  // whatever its spelling; everything below it is checked level by level.
+  let top: string | null = null;
+  const ancestors: string[] = [];
+  for (let a = dir; ; a = dirname(a)) {
+    ancestors.unshift(a);
+    if (dirname(a) === a) break;
+  }
+  for (const a of ancestors) {
+    try {
+      if (realpathSync(a) === realTop) {
+        top = a;
+        break;
+      }
+    } catch {
+      break; // doesn't exist yet, so nothing below it does either
+    }
+  }
+  if (top !== null) {
     // Inside the repository: check each level before creating anything, so a
     // linked folder can't even get an empty directory made at its target.
     let d = top;
@@ -518,8 +536,8 @@ export function writeAttestation(filePath: string, att: Attestation): void {
         st = undefined;
       }
       if (!st) mkdirSync(d);
-      else if (st.isSymbolicLink()) throw new Error(`${relative(cwd, d)} is a link: refusing to write an attestation through it`);
-      else if (!st.isDirectory()) throw new Error(`${relative(cwd, d)} is not a folder`);
+      else if (st.isSymbolicLink()) throw new Error(`${relative(cwd, d) || d} is a link: refusing to write an attestation through it`);
+      else if (!st.isDirectory()) throw new Error(`${relative(cwd, d) || d} is not a folder`);
     }
   } else {
     mkdirSync(dir, { recursive: true }); // a folder the user chose outside the repository
