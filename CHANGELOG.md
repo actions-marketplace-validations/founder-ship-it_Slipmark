@@ -4,6 +4,8 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 ### Security
 - **`slipmark attest` never writes through a link inside the repository.** A
   pull request could commit a link at an attestation's file name, or make
@@ -22,7 +24,7 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   dependencies. Setup in [docs/mcp.md](./docs/mcp.md).
 
 ### Changed
-- **Claude Code plugin 0.5.1: Claude knows when its instructions changed.** When
+- **Claude Code plugin: Claude knows when its instructions changed.** When
   the policy has a `context` section, the plugin's Stop hook now also flags
   verdicts given under a different AGENTS.md, CLAUDE.md, skill, hook or MCP
   config, asks Claude to read the changed instructions before attesting again,
@@ -30,6 +32,7 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
   context file list from the working tree's policy; approvals, hidden content
   and coverage stay with the CI gate, which reads the policy from the base
   branch. Update with `/plugin marketplace update slipmark`.
+- The npm package now includes this changelog.
 
 ## [0.5.0] - 2026-10-25
 
