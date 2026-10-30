@@ -65,6 +65,18 @@ Every change needs a test. Run `npm test`. New engine behavior should assert the
 - Keep the engine dependency-free. New runtime dependencies need a strong reason.
 - Match the surrounding comment density and naming.
 
+## Releasing
+
+1. Open a PR that bumps `version` in package.json, moves the changelog's
+   Unreleased section under the new version, and updates the version pins
+   (README, Action and plugin skills). Merge it once CI is green.
+2. Create a GitHub release with the tag `v<version>` on `main`, with
+   "Publish this Action to the GitHub Marketplace" ticked.
+3. `.github/workflows/publish.yml` then publishes to npm through trusted
+   publishing, with provenance. No npm token, and nothing is published from a
+   laptop. It refuses if the tag doesn't match package.json, and runs the full
+   test suite first.
+
 ## Non-negotiables (the things that make Slipmark trustworthy)
 
 - Never make the engine present a heuristic as proof — respect the confidence caps.

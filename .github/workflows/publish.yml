@@ -1,0 +1,62 @@
+# Publishes slipmark to npm when a GitHub release is published, with npm's
+# trusted publishing: no npm token is stored anywhere, and the package gets a
+# provenance statement ("Built and signed on GitHub Actions") tying it to this
+# workflow and commit, logged in Sigstore's public ledger.
+#
+# One-time setup on npmjs.com: package settings > Trusted publisher > GitHub
+# Actions, with owner founder-ship-it, repository Slipmark, workflow
+# publish.yml and environment npm.
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write   # the identity npm checks, and provenance is signed with
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or later (trusted publishing needs it)
+        run: npm install -g npm@^11.5.1 && npm --version
+      - name: Check the tag matches package.json
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Release tag $TAG doesn't match package.json version $version. Bump the version first."
+            exit 1
+          fi
+      - name: Check this version isn't on npm yet
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if npm view "slipmark@$version" version >/dev/null 2>&1; then
+            echo "::notice title=Already published::slipmark@$version is already on npm, nothing to do"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - run: npm ci
+        if: env.SKIP != '1'
+      - name: Publish (runs the tests first, through prepublishOnly)
+        if: env.SKIP != '1'
+        run: npm publish --provenance --access public
+      - name: Summary
+        if: env.SKIP != '1'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "Published [slipmark@$version](https://www.npmjs.com/package/slipmark/v/$version) with provenance." >> "$GITHUB_STEP_SUMMARY"
