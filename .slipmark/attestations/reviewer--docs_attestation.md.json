@@ -2,7 +2,7 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-30T07:51:50.862Z",
+  "at": "2026-10-30T08:12:20.671Z",
   "subjects": [
     {
       "path": "docs/attestation.md",
@@ -15,8 +15,8 @@
   "against": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "23a3201f67b2cc73f16d421b76464cdde899eef76e5b14d999a38335b612d9cf"
+      "sha256": "bdb8ef313489897d87ede395b591cdc90f468604bc33da4aabc44b624f28fd5c"
     }
   ],
-  "note": "Doc is byte-identical to main and still accurate against the changed attestation.ts: the writeAttestation example, @1 schema without v2 options, failed --run exits 2 writing nothing, verify exits 1 on a changed file; it makes no write-safety claim the code would contradict."
+  "note": "Doc is byte-identical to main and still accurate against the changed attestation.ts: its writeAttestation example works, @1 schema without v2 options, failed --run exits 2 writing nothing, verify exits 1 on a changed file; it makes no write-safety claim the code contradicts."
 }
