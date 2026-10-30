@@ -4,6 +4,15 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Security
+- **`slipmark attest` never writes through a link inside the repository.** A
+  pull request could commit a link at an attestation's file name, or make
+  `.slipmark/` a link, so attesting in that checkout wrote a file outside the
+  repository. A link at the file, or at any folder between the top of the
+  repository and it, is now refused before anything is created, and the file
+  is written to a temporary name then renamed into place. Found in review of
+  the MCP server.
+
 ### Added
 - **`slipmark mcp`**: an MCP server on stdio with two tools, `slipmark_attest`
   and `slipmark_verify`, so Codex, Cursor, Copilot, Claude Code, Gemini CLI and

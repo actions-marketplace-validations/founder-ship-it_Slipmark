@@ -239,3 +239,21 @@ test("writeAttestation: a link deeper in a chosen --dir is refused too", () => {
   }
   assert.deepEqual(readdirSync(outside), []);
 });
+
+test("writeAttestation: a linked .slipmark is refused when attesting from a subfolder", () => {
+  const root = mkdtempSync(join(tmpdir(), "sm-sub-"));
+  execFileSync("git", ["init", "-q", root]);
+  mkdirSync(join(root, "sub"));
+  writeFileSync(join(root, "sub/b.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outsub-"));
+  symlinkSync(outside, join(root, ".slipmark"));
+  const att = createAttestation({ root, subjects: ["sub/b.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(join(root, "sub"));
+  try {
+    assert.throws(() => writeAttestation(join(root, ".slipmark/attestations/x.json"), att), /\.slipmark is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+});

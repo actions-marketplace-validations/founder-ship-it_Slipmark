@@ -542,13 +542,6 @@ merge and a verdict produced anywhere else won't match.
 - Attestation files are untrusted input. Subject paths that are absolute,
   escape the repository root, or resolve outside it through a symlink are
   rejected and never read.
-- `slipmark attest` never writes through a link. A pull request can commit a
-  link at an attestation's file name, or make `.slipmark/` a link; writing
-  through either would put a file outside the repository. A link at the file,
-  or at any folder between the working folder and it, is refused before
-  anything is created, and the file is written to a temporary name then
-  renamed into place. The MCP server writes each verdict to a new file of its
-  own and never overwrites one.
 - The gate proves a verdict is about the current bytes. It doesn't prove the
   verdict is right. Unsigned, it doesn't prove who wrote it either: protect who
   can write to the attestation directory as you would any CI input, or require

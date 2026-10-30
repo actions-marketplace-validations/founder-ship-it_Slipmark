@@ -487,8 +487,8 @@ export function defaultAttestationPath(dir: string, att: Attestation): string {
  * link at an attestation's predictable name, or link `.slipmark/` elsewhere;
  * writing through either would put the file (or overwrite one) outside the
  * repository when someone attests in that checkout. So: refuse a link at the
- * file or at any folder on its way down from the working folder (checked before
- * anything is created), and write
+ * file or at any folder on its way down from the top of the repository (checked
+ * before anything is created), and write
  * a temporary file then rename it over the name, which replaces a link rather
  * than writing to its target.
  */
@@ -496,11 +496,20 @@ export function writeAttestation(filePath: string, att: Attestation): void {
   const file = resolve(filePath);
   const dir = dirname(file);
   const cwd = resolve(process.cwd());
-  if (dir === cwd || dir.startsWith(cwd + sep)) {
-    // Inside the working folder: check each level before creating anything, so
-    // a linked folder can't even get an empty directory made at its target.
-    let d = cwd;
-    for (const part of relative(cwd, dir).split(sep).filter(Boolean)) {
+  // Check from the top of the repository, so a linked .slipmark is caught when
+  // attesting from a subfolder too. Outside a repository, from the working folder.
+  let top = cwd;
+  try {
+    // git prints the real path (macOS: /private/var/...); map it back onto the working folder's spelling.
+    top = resolve(cwd, relative(realpathSync(cwd), realpathSync(git(cwd, ["rev-parse", "--show-toplevel"]).trim())));
+  } catch {
+    top = cwd;
+  }
+  if (dir === top || dir.startsWith(top + sep)) {
+    // Inside the repository: check each level before creating anything, so a
+    // linked folder can't even get an empty directory made at its target.
+    let d = top;
+    for (const part of relative(top, dir).split(sep).filter(Boolean)) {
       d = join(d, part);
       let st: ReturnType<typeof lstatSync> | undefined;
       try {
@@ -513,7 +522,7 @@ export function writeAttestation(filePath: string, att: Attestation): void {
       else if (!st.isDirectory()) throw new Error(`${relative(cwd, d)} is not a folder`);
     }
   } else {
-    mkdirSync(dir, { recursive: true }); // a folder the user chose outside the working folder
+    mkdirSync(dir, { recursive: true }); // a folder the user chose outside the repository
   }
   let existing: ReturnType<typeof lstatSync> | undefined;
   try {
