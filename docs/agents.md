@@ -31,6 +31,8 @@ touched.
 | Claude Code | `CLAUDE.md` if it exists | If the repo has `.claude/` but no `CLAUDE.md`, `init` creates one containing `@AGENTS.md`. Otherwise create that file yourself. Or install the [Slipmark plugin](../claude-plugin/README.md), which needs no repo instructions. |
 | Anything else | `AGENTS.md` | Or paste the block into the agent's system prompt. |
 
+Any of these can also call Slipmark as MCP tools instead of running `npx`. See [mcp.md](./mcp.md).
+
 ## Let the agent run the command
 
 Agents that ask before running shell commands need permission for

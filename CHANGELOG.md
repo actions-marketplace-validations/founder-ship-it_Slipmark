@@ -4,6 +4,14 @@ All notable changes to Slipmark (formerly DriftGuard) are documented here.
 
 ## [Unreleased]
 
+### Added
+- **`slipmark mcp`**: an MCP server on stdio with two tools, `slipmark_attest`
+  and `slipmark_verify`, so Codex, Cursor, Copilot, Claude Code, Gemini CLI and
+  any other MCP client can record and check verdicts. Verdicts it records are
+  `kind: agent`; it can't record a human approval, run commands or sign. No
+  network calls except Sigstore checks of signed verdicts, and no new runtime
+  dependencies. Setup in [docs/mcp.md](./docs/mcp.md).
+
 ### Changed
 - **Claude Code plugin 0.5.1: Claude knows when its instructions changed.** When
   the policy has a `context` section, the plugin's Stop hook now also flags
