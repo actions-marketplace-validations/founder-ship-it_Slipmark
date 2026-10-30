@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { handle } from "../src/mcp.js";
+import { handle, mcpRoot } from "../src/mcp.js";
+import { createAttestation, writeAttestation, defaultAttestationPath } from "../src/attest/attestation.js";
 
 const CLI = resolve("dist/src/cli.js");
 
@@ -104,4 +105,61 @@ test("mcp: bad input comes back as a readable tool error, not a crash", async ()
   };
   assert.equal(v.result.isError, true);
   assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }, root, "t"), null);
+});
+
+const call = async (root: string, name: string, args: object) =>
+  ((await handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, root, "t")) as {
+    result: { isError?: boolean; content: { text: string }[] };
+  }).result;
+
+test("mcp: never overwrites an existing verdict, a person's approval included", async () => {
+  const root = repo();
+  const human = createAttestation({ root, subjects: ["src/a.ts"], verdict: "pass", by: "alice", kind: "human" });
+  const humanFile = defaultAttestationPath(join(root, ".slipmark/attestations"), human);
+  writeAttestation(humanFile, human);
+  const r = await call(root, "slipmark_attest", { by: "alice", verdict: "fail", subjects: ["src/a.ts"] });
+  assert.ok(!r.isError);
+  assert.equal(JSON.parse(readFileSync(humanFile, "utf8")).kind, "human", "the person's verdict is untouched");
+  assert.equal(readdirSync(join(root, ".slipmark/attestations")).length, 2);
+});
+
+test("mcp: a linked attestations folder can't redirect the write outside the repo", async () => {
+  const root = repo();
+  const outside = mkdtempSync(join(tmpdir(), "sm-mcp-out-"));
+  mkdirSync(join(root, ".slipmark"), { recursive: true });
+  symlinkSync(outside, join(root, ".slipmark/attestations"));
+  const r = await call(root, "slipmark_attest", { by: "r", verdict: "pass", subjects: ["src/a.ts"] });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0]!.text, /must be a real folder/);
+  assert.equal(readdirSync(outside).length, 0);
+});
+
+test("mcp: messages that aren't one request object get an error, not a crash", async () => {
+  const root = repo();
+  for (const bad of [null, 5, "x", [{ jsonrpc: "2.0", id: 1, method: "ping" }], { jsonrpc: "2.0", id: 3 }]) {
+    const r = (await handle(bad, root, "t")) as { error: { code: number } };
+    assert.equal(r.error.code, -32600);
+  }
+});
+
+test("mcp: echoes a protocol version it supports", async () => {
+  const r = (await handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } }, repo(), "t")) as {
+    result: { protocolVersion: string };
+  };
+  assert.equal(r.result.protocolVersion, "2025-03-26");
+});
+
+test("mcp: coverageBase can't be the commit you're on", async () => {
+  const root = repo();
+  execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A"]);
+  execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]);
+  const r = await call(root, "slipmark_verify", { coverageBase: "HEAD~0" });
+  assert.equal(r.isError, true);
+});
+
+test("mcp: refuses to serve a subfolder of a repository", () => {
+  const root = repo();
+  assert.throws(() => mcpRoot([], {}, join(root, "src")), /repository root/);
+  assert.equal(mcpRoot(["--root", root], {}, "/"), root);
+  assert.equal(existsSync(mcpRoot([], { SLIPMARK_ROOT: root }, "/")), true);
 });

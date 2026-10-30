@@ -16,7 +16,11 @@ signatures on signed verdicts. The check against GitHub's renderer stays in CI.
 
 It is deliberately narrower than the CLI. An agent can't record a `human`
 verdict through it, which is how agent instruction changes are approved, and
-it can't run commands (`--run`) or sign. Verdicts it records are `kind: agent`.
+it can't run commands (`--run`) or sign. Verdicts it records are `kind: agent`
+and always record the agent's context. Each is written to a new file of its
+own (`mcp--<by>--<hash>.json`): the server never overwrites a verdict, so an
+agent can't replace a person's approval or another reviewer's `fail` by
+reusing their name. It refuses to write through a linked `.slipmark` folder.
 
 ## Setup
 
@@ -70,8 +74,11 @@ args = ["-y", "slipmark@0.6.0", "mcp"]
 }
 ```
 
-If your client starts servers somewhere other than the project folder, set its
-working directory option (`cwd`) to the repository root.
+The server must run at the repository root, where agents read their
+instructions and CI checks verdicts. It starts in the folder the client starts
+it in. If your client starts servers somewhere else (global configs often do),
+add `"--root", "/path/to/repo"` to the args, or set `SLIPMARK_ROOT`. Started
+inside a repository but not at its root, it refuses to run.
 
 Adding the server to a config file in the repository (`.cursor/mcp.json`,
 `.vscode/mcp.json`, `.gemini/settings.json`) changes the agent's context. With

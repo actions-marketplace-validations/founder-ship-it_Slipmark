@@ -25,7 +25,7 @@ import { existsSync } from "node:fs";
 import { planInit, applyInit } from "./init.js";
 import { uploadRun, summaryMarkdown } from "./cloud/upload.js";
 import { appendFileSync } from "node:fs";
-import { serveMcp } from "./mcp.js";
+import { serveMcp, mcpRoot } from "./mcp.js";
 
 /** Version from the package this CLI ships in (dist/src/cli.js → ../../package.json). */
 function version(): string {
@@ -42,7 +42,7 @@ Usage
   slipmark init                 Wire Slipmark into this repo (workflow + agent instructions)
   slipmark attest ...           Record a verdict bound to the SHA-256 of the files it covers
   slipmark verify               Refuse if any verdict is about different files from these
-  slipmark mcp                  Serve attest and verify as MCP tools on stdio (Codex, Cursor, Copilot, Claude, Gemini)
+  slipmark mcp [--root <dir>]   Serve attest and verify as MCP tools on stdio (Codex, Cursor, Copilot, Claude, Gemini)
   slipmark upload               Record this CI run in Slipmark Cloud (GitHub Actions, id-token: write)
   slipmark <pack>               Run drift diagnosis locks
   slipmark bisect ...           Find the commit where a probe started failing
@@ -401,7 +401,13 @@ async function main() {
     return;
   }
   if (args[0] === "mcp") {
-    await serveMcp(process.cwd(), version());
+    let root: string;
+    try {
+      root = mcpRoot(args.slice(1), process.env, process.cwd());
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+    await serveMcp(root!, version());
     return;
   }
   if (args[0] === "upload") {
