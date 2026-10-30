@@ -161,6 +161,21 @@ re-attest when a file it signed off has changed since.
 
 Details, including exactly what it runs, in [claude-plugin/](./claude-plugin/README.md).
 
+### MCP server: Codex, Cursor, Copilot, Gemini
+
+`slipmark mcp` serves `slipmark_attest` and `slipmark_verify` as MCP tools, so
+any agent that speaks MCP can record and check verdicts. For OpenAI Codex, in
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.slipmark]
+command = "npx"
+args = ["-y", "slipmark@0.6.0", "mcp"]
+```
+
+Setup for Claude Code, Cursor, Copilot in VS Code and Gemini CLI is in
+[docs/mcp.md](./docs/mcp.md). Agents can't record a human approval through it.
+
 ## Verdict attestation
 
 **1. The agent attests what it read.** Call this at the end of any agent step
@@ -573,6 +588,7 @@ npm run demo          # drift diagnosis on the demo pack
 
 - [Verdict attestation](./docs/attestation.md): the schema, the statuses, wiring agents in.
 - [Coding agents](./docs/agents.md): Claude Code, Cursor, Copilot and Codex setup.
+- [MCP server](./docs/mcp.md): `slipmark mcp` for any agent that speaks MCP.
 - [Attestation v2](./docs/attestation-v2.md) (draft): richer attestations, coverage, quorum, delta re-attestation, human overrides.
 - [Hash modes](./docs/hash-modes.md) (draft): formatting-tolerant hashing, chosen per path by policy.
 - [Concepts](./docs/concepts.md) — the mental model (locks, packs, signatures,
