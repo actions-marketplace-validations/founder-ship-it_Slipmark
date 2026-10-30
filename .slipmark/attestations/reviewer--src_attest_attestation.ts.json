@@ -2,11 +2,11 @@
   "schema": "slipmark/attestation@2",
   "by": "reviewer",
   "verdict": "pass",
-  "at": "2026-10-30T07:47:55.989Z",
+  "at": "2026-10-30T07:51:50.794Z",
   "subjects": [
     {
       "path": "src/attest/attestation.ts",
-      "sha256": "c4fcce8a06e4e9ba81c910ac49e15b650d7d72b901fed237193c9b26af92d64d"
+      "sha256": "23a3201f67b2cc73f16d421b76464cdde899eef76e5b14d999a38335b612d9cf"
     }
   ],
   "agent": {
@@ -18,5 +18,5 @@
       "sha256": "37e910537001430cc329cbc6b8f09e281bfc0a1eeec33f0bd73b7a4eeec410b4"
     }
   ],
-  "note": "Checked writeAttestation refuses links at the file and at every folder level from cwd before creating anything (reproduced linked .slipmark and deep --dir links: nothing written outside), temp-then-rename in the same folder, legitimate --out outside the repo still works, and npm test passes 209/209."
+  "note": "Checked writeAttestation refuses links at the file and at every folder from the git top-level down before creating anything (reproduced linked .slipmark from root and from a subfolder, and a link deep in --dir: nothing written outside), temp-then-rename in the same folder, legitimate --out outside the repo and subfolder attests still work, npm test 210/210."
 }
