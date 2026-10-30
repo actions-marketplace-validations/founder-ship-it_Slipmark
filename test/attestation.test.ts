@@ -276,3 +276,23 @@ test("writeAttestation: links are caught when the repository is reached through 
   }
   assert.deepEqual(readdirSync(outside), []);
 });
+
+test("writeAttestation: an alias pointing into a subfolder of the repository can't skip the checks", () => {
+  const real = mkdtempSync(join(tmpdir(), "sm-subalias-"));
+  execFileSync("git", ["init", "-q", real]);
+  mkdirSync(join(real, "pkg"));
+  writeFileSync(join(real, "pkg/b.ts"), "1\n");
+  const outside = mkdtempSync(join(tmpdir(), "sm-outsubalias-"));
+  symlinkSync(outside, join(real, "pkg/.slipmark"));
+  const alias = join(mkdtempSync(join(tmpdir(), "sm-al-")), "pkg");
+  symlinkSync(join(real, "pkg"), alias);
+  const att = createAttestation({ root: real, subjects: ["pkg/b.ts"], verdict: "pass", by: "rev" });
+  const prev = process.cwd();
+  process.chdir(real);
+  try {
+    assert.throws(() => writeAttestation(join(alias, ".slipmark/attestations/x.json"), att), /is a link/);
+  } finally {
+    process.chdir(prev);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+});

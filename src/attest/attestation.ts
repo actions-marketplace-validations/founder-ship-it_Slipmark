@@ -505,8 +505,9 @@ export function writeAttestation(filePath: string, att: Attestation): void {
     realTop = realpathSync(cwd);
   }
   // The same folder can be spelled two ways (macOS: /var/... is /private/var/...).
-  // Find the outermost ancestor of the target that *is* the repository top,
-  // whatever its spelling; everything below it is checked level by level.
+  // Find the outermost ancestor of the target that is inside the repository,
+  // whatever its spelling (an alias may point at a subfolder); everything below
+  // it is checked level by level.
   let top: string | null = null;
   const ancestors: string[] = [];
   for (let a = dir; ; a = dirname(a)) {
@@ -515,7 +516,8 @@ export function writeAttestation(filePath: string, att: Attestation): void {
   }
   for (const a of ancestors) {
     try {
-      if (realpathSync(a) === realTop) {
+      const r = realpathSync(a);
+      if (r === realTop || r.startsWith(realTop + sep)) {
         top = a;
         break;
       }
